@@ -16,6 +16,7 @@
 - **里程碑管理** - 追踪项目进度百分比，目标日期倒计时
 - **项目日记** - 每日开发日志记录，支持 markdown
 - **甘特图视图** - 时间线展示任务排期和进度
+- **任务依赖** - 任务间依赖关系可视化
 
 ### 专注工作
 - **番茄计时器** - 自定义工作/休息时长，短长休息轮换
@@ -64,32 +65,15 @@
 | 项目管理 | `/projects` | 项目创建、编辑、删除、克隆 |
 | 今日任务 | `/today-tasks` | 当天发布的重点任务 |
 | 任务看板 | `/tasks` | 看板视图管理所有任务 |
+| 任务依赖 | `/task-dependencies` | 任务依赖关系可视化 |
 | 番茄钟 | `/pomodoro` | 专注计时器 |
 | 专注记录 | `/focus-sessions` | 专注历史和统计 |
 | 里程碑 | `/milestones` | 项目里程碑进度管理 |
-| 时间线 | `/timeline` | 项目事件时间轴 |
 | 日记 | `/diary` | 每日开发日志 |
 | 甘特图 | `/gantt` | 任务时间线视图 |
 | 分析 | `/analytics` | 数据统计和成就系统 |
 | 团队协作 | `/collaboration` | 团队管理 (Beta) |
 | 设置 | `/settings` | 应用配置和偏好 |
-
-## 数据模型
-
-```
-DevTrackDB (IndexedDB)
-├── projects        # 项目
-├── tasks           # 任务
-├── milestones      # 里程碑
-├── timelineEvents  # 时间线事件
-├── diaryEntries    # 日记条目
-├── achievements    # 成就系统
-├── users           # 用户账户 (Beta)
-├── teamMembers     # 团队成员 (Beta)
-├── syncChanges     # 同步变更记录 (Beta)
-├── collaborationEvents  # 协作活动 (Beta)
-└── inviteLinks     # 邀请链接 (Beta)
-```
 
 ## 快速开始
 
@@ -115,25 +99,25 @@ npm run build
 
 构建产物输出到 `dist` 目录。
 
-### 代码检查
-
-```bash
-npm run lint
-```
-
 ## 云同步配置（可选）
 
-本应用支持云端同步和团队协作功能，需要配置 Supabase。
+本应用支持云端同步和团队协作功能。
 
 ### 步骤 1：创建 Supabase 项目
 
-1. 访问 [supabase.com](https://supabase.com) 注册/登录
+1. 访问 [supabase.com](https://supabase.com) 注册/登录（推荐使用 QQ 邮箱）
 2. 点击 "New Project"，创建免费项目
 3. 记住生成的 **Project URL** 和 **anon public** 密钥
 
 ### 步骤 2：配置环境变量
 
-在项目根目录创建 `.env` 文件：
+复制 `.env.example` 为 `.env`：
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env`，填入你的 Supabase 配置：
 
 ```env
 VITE_SUPABASE_URL=你的Project URL
@@ -142,9 +126,7 @@ VITE_SUPABASE_ANON_KEY=你的anon密钥
 
 ### 步骤 3：创建数据库表
 
-在 Supabase 后台进入 **SQL Editor**，运行 `supabase-setup.sql` 文件中的内容。
-
-具体内容见 `supabase-setup.sql` 文件。
+在 Supabase 后台进入 **SQL Editor**，复制 `supabase-setup.sql` 文件的全部内容，运行即可。
 
 ### 步骤 4：运行应用
 
@@ -153,6 +135,12 @@ npm run dev
 ```
 
 打开 http://localhost:5173，注册账号即可使用云同步和团队协作功能。
+
+## 团队协作使用方法
+
+1. **发布共享项目**：在团队协作页面，选择项目点击"发布共享"
+2. **生成邀请链接**：点击"邀请成员"，选择角色（编辑者/查看者），复制链接
+3. **成员加入**：被邀请人打开链接，选择"加入项目"即可
 
 ## 项目结构
 
@@ -168,13 +156,10 @@ src/
 ├── pages/                 # 页面组件
 ├── stores/                # Zustand 状态管理
 ├── lib/                   # 工具函数
-│   ├── duration.ts       # 时间格式化
-│   ├── riskAnalysis.ts   # 风险分析
-│   ├── milestones.ts     # 里程碑逻辑
-│   ├── reporting.ts      # 周报生成
-│   └── systemEvents.ts   # 系统事件
+│   ├── cloudSync.ts      # 云端同步
+│   └── ...
 ├── db/                    # 数据库层
-│   └── database.ts       # Dexie 配置和操作
+│   └── database.ts       # Dexie 配置
 └── types/                 # TypeScript 类型定义
     └── index.ts
 ```
@@ -189,13 +174,11 @@ src/
 
 ## 后续计划
 
-- [ ] 燃尽图 (Burndown Chart)
 - [ ] 浏览器通知推送
 - [ ] 移动端适配
-- [ ] 数据导入/导出 (JSON/CSV)
+- [ ] 数据导入/导出
 - [ ] 任务标签系统
 - [ ] 循环任务
-- [ ] 任务依赖关系可视化
 
 ## 许可证
 

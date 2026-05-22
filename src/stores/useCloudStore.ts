@@ -7,6 +7,7 @@ import {
   buildRemoteInviteUrl,
   deleteRemoteMember,
   fetchRemoteMembers,
+  getCloudPendingChangeCount,
   importSharedProjects,
   joinRemoteProject,
   loadCloudSession,
@@ -74,7 +75,7 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
         // Keep local startup available when the network is unavailable.
       }
     }
-    const pendingChanges = await db.syncChanges.count();
+    const pendingChanges = await getCloudPendingChangeCount();
     set({
       session,
       user: session?.user ?? null,
@@ -118,7 +119,7 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
   syncNow: async () => {
     const session = get().session;
     if (!session) {
-      const pendingChanges = await db.syncChanges.count();
+      const pendingChanges = await getCloudPendingChangeCount();
       set({ syncState: { ...get().syncState, pendingChanges, syncStatus: navigator.onLine ? 'synced' : 'offline' } });
       return;
     }
@@ -128,7 +129,7 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
       const syncState = await runCloudSync(session);
       set({ syncState });
     } catch (error) {
-      const pendingChanges = await db.syncChanges.count();
+      const pendingChanges = await getCloudPendingChangeCount();
       set({
         error: error instanceof Error ? error.message : '同步失败',
         syncState: {

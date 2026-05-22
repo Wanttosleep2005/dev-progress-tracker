@@ -112,7 +112,8 @@ async function queueSyncChange(
   projectId: number | null,
   operation: SyncChange['operation'],
   payload: Record<string, unknown>,
-  baseUpdatedAt: string | null
+  baseUpdatedAt: string | null,
+  remoteProjectIdOverride?: string | null
 ) {
   if (suppressSyncTracking) return;
   const localUpdatedAt = new Date().toISOString();
@@ -121,7 +122,7 @@ async function queueSyncChange(
     entityType,
     entityId,
     projectId,
-    remoteProjectId: projectId ? (await db.projects.get(projectId))?.remoteProjectId ?? null : null,
+    remoteProjectId: remoteProjectIdOverride ?? (projectId ? (await db.projects.get(projectId))?.remoteProjectId ?? null : null),
     operation,
     payload,
     baseUpdatedAt,
@@ -162,12 +163,12 @@ export async function updateProject(id: number, changes: Partial<Project>): Prom
 
 export async function deleteProject(id: number): Promise<void> {
   const before = await db.projects.get(id);
+  await queueSyncChange('projects', id, id, 'delete', { id, remoteProjectId: before?.remoteProjectId ?? null }, before?.updatedAt ?? null, before?.remoteProjectId ?? null);
   await db.projects.delete(id);
   await db.tasks.where('projectId').equals(id).delete();
   await db.milestones.where('projectId').equals(id).delete();
   await db.timelineEvents.where('projectId').equals(id).delete();
   await db.diaryEntries.where('projectId').equals(id).delete();
-  await queueSyncChange('projects', id, id, 'delete', { id }, before?.updatedAt ?? null);
 }
 
 export async function cloneProject(id: number, newName: string): Promise<number> {

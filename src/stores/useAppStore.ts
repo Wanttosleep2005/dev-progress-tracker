@@ -3,6 +3,7 @@ import type { Project, Achievement } from '../types';
 import { ACHIEVEMENTS } from '../types';
 import * as db from '../db/database';
 import { recordProjectCreated, recordProjectDeadlineChanged } from '../lib/systemEvents';
+import { deleteRemoteProjectFromCloud, loadCloudSession } from '../lib/cloudSync';
 
 interface AppStore {
   currentProjectId: number | null;
@@ -63,6 +64,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   deleteProject: async (id) => {
+    const existing = await db.getProject(id);
+    const session = loadCloudSession();
+    if (session && existing?.remoteProjectId) {
+      try {
+        await deleteRemoteProjectFromCloud(session, existing.remoteProjectId);
+      } catch {
+        // Keep local deletion available; the queued sync delete will retry later.
+      }
+    }
     await db.deleteProject(id);
     const projects = await db.getAllProjects();
     set({ projects, currentProjectId: projects[0]?.id ?? null });

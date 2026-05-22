@@ -20,6 +20,7 @@ import {
   Plus,
   Settings,
   Upload,
+  Workflow,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/useAppStore';
 import { PROJECT_COLORS, PROJECT_ICONS } from '../../types';
@@ -45,7 +46,7 @@ export default function Sidebar() {
     { to: '/portfolio', icon: LayoutDashboard, label: '项目总览' },
     { to: '/today-tasks', icon: AlarmClock, label: '今日任务' },
     { to: '/tasks', icon: Kanban, label: '任务看板' },
-    { to: '/dependencies', icon: GitBranch, label: '任务依赖' },
+    { to: '/dependencies', icon: Workflow, label: '任务依赖' },
     { to: '/pomodoro', icon: AlarmClock, label: '番茄钟' },
     { to: '/focus-sessions', icon: History, label: '专注记录' },
     { to: '/milestones', icon: FolderOpen, label: '里程碑' },

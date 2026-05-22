@@ -169,13 +169,13 @@ export default function Pomodoro() {
           </div>
 
           <div className="mt-4 flex flex-wrap justify-center gap-3">
-            <button onClick={() => stop(false)} className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-300 hover:bg-red-500/20">
-              <Square size={14} />
-              提前结束
-            </button>
             <button onClick={() => skipToPrevious()} className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm text-slate-300 hover:bg-white/[0.05]">
               <SkipBack size={14} />
               回到上一阶段
+            </button>
+            <button onClick={() => stop(false)} className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-300 hover:bg-red-500/20">
+              <Square size={14} />
+              提前结束
             </button>
             <button onClick={() => skipToNext()} className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm text-slate-300 hover:bg-white/[0.05]">
               <SkipForward size={14} />

@@ -11,6 +11,7 @@ import {
   Lock,
   Plus,
   RefreshCw,
+  Search,
   SquarePen,
   Timer as TimerIcon,
   Trash2,
@@ -53,6 +54,7 @@ export default function TaskBoard() {
   const [dragOverMilestone, setDragOverMilestone] = useState<number | null>(null);
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [dependencyQuery, setDependencyQuery] = useState('');
 
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
@@ -153,6 +155,19 @@ export default function TaskBoard() {
   const priorityOptions = (['low', 'medium', 'high', 'urgent'] as TaskPriority[]).map(priority => ({ value: priority, label: PRIORITY_LABELS[priority] }));
   const statusOptions = COLUMNS.map(status => ({ value: status, label: STATUS_LABELS[status] }));
   const milestoneOptions = milestones.map(milestone => ({ value: milestone.id!, label: milestone.title }));
+  const dependencyOptions = useMemo(() => {
+    if (!editingTask) return [];
+    const keyword = dependencyQuery.trim().toLowerCase();
+    return tasks.filter(task => {
+      if (!task.id || task.id === editingTask.id) return false;
+      if (!keyword) return true;
+      return (
+        task.title.toLowerCase().includes(keyword) ||
+        task.description.toLowerCase().includes(keyword) ||
+        task.tags.some(tag => tag.toLowerCase().includes(keyword))
+      );
+    });
+  }, [dependencyQuery, editingTask, tasks]);
 
   const taskSummary = useMemo(() => {
     const done = tasks.filter(task => task.status === 'done').length;
@@ -189,7 +204,7 @@ export default function TaskBoard() {
                 else next.add(task.id!);
                 return next;
               })
-            : setEditingTask({ ...task, dependsOn: getTaskDependencyIds(task), dependencyIds: getTaskDependencyIds(task) })
+            : (setDependencyQuery(''), setEditingTask({ ...task, dependsOn: getTaskDependencyIds(task), dependencyIds: getTaskDependencyIds(task) }))
         }
         whileHover={batchMode ? undefined : { y: -2 }}
         className={`group relative rounded-[24px] border bg-[#0e1524] p-4 transition-all ${canEditProject ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${
@@ -539,11 +554,20 @@ export default function TaskBoard() {
                       {getTaskDependencyIds(editingTask).length} 项
                     </span>
                   </div>
+                  <div className="relative mb-3">
+                    <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      value={dependencyQuery}
+                      onChange={event => setDependencyQuery(event.target.value)}
+                      placeholder="搜索任务名称、说明或标签"
+                      className="w-full rounded-xl border border-white/[0.06] bg-[#0a101a] py-2 pl-9 pr-3 text-xs text-white placeholder-slate-600 outline-none focus:border-sky-500/40"
+                    />
+                  </div>
                   <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
-                    {tasks.filter(task => task.id && task.id !== editingTask.id).length === 0 ? (
+                    {dependencyOptions.length === 0 ? (
                       <p className="text-xs text-slate-500">暂无可选择的其他任务。</p>
                     ) : (
-                      tasks.filter(task => task.id && task.id !== editingTask.id).map(task => {
+                      dependencyOptions.map(task => {
                         const ids = getTaskDependencyIds(editingTask);
                         const checked = task.id ? ids.includes(task.id) : false;
                         return (

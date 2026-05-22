@@ -2,6 +2,7 @@ import { db, withoutSyncTracking } from '../db/database';
 import type { CollaborationEvent, Project, SyncChange, SyncEntityType, SyncState, TeamMember, User } from '../types';
 
 const AUTH_STORAGE_KEY = 'devtrack-cloud-session';
+const DELETED_REMOTE_PROJECTS_KEY = 'devtrack-deleted-remote-projects';
 
 export interface CloudSession {
   accessToken: string;
@@ -66,11 +67,25 @@ const tableMap = {
 
 function getSupabaseConfig() {
   return {
-    url: import.meta.env.VITE_SUPABASE_URL as string | undefined,
-    anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined,
+    url: (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim().replace(/\/$/, ''),
+    anonKey: (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim(),
     syncTable: (import.meta.env.VITE_SUPABASE_SYNC_TABLE as string | undefined) || 'devtrack_sync_records',
     projectTable: (import.meta.env.VITE_SUPABASE_PROJECT_TABLE as string | undefined) || 'devtrack_projects',
     memberTable: (import.meta.env.VITE_SUPABASE_MEMBER_TABLE as string | undefined) || 'devtrack_project_members',
+  };
+}
+
+function assertConfigured(): { url: string; anonKey: string; syncTable: string; projectTable: string; memberTable: string } {
+  const config = getSupabaseConfig();
+  if (!config.url || !config.anonKey || config.url.includes('your-project') || config.anonKey.includes('your-anon-key')) {
+    throw new Error('请先配置真实的 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY，然后重新启动或重新部署项目。');
+  }
+  return {
+    url: config.url,
+    anonKey: config.anonKey,
+    syncTable: config.syncTable,
+    projectTable: config.projectTable,
+    memberTable: config.memberTable,
   };
 }
 
@@ -83,26 +98,65 @@ function getClientId() {
   return next;
 }
 
-function assertConfigured(): { url: string; anonKey: string; syncTable: string; projectTable: string; memberTable: string } {
-  const config = getSupabaseConfig();
-  if (!config.url || !config.anonKey) {
-    throw new Error('请先配置 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY。');
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '='));
+    return JSON.parse(decoded) as Record<string, unknown>;
+  } catch {
+    return null;
   }
-  return { url: config.url, anonKey: config.anonKey, syncTable: config.syncTable, projectTable: config.projectTable, memberTable: config.memberTable };
+}
+
+function getSessionAuthUserId(session: CloudSession): string {
+  const jwtSub = decodeJwtPayload(session.accessToken)?.sub;
+  if (typeof jwtSub === 'string' && jwtSub) return jwtSub;
+  if (session.user.id) return session.user.id;
+  throw new Error('登录状态缺少 Supabase 用户 ID，请退出后重新登录。');
+}
+
+function getDeletedRemoteProjectIds() {
+  try {
+    return new Set<string>(JSON.parse(localStorage.getItem(DELETED_REMOTE_PROJECTS_KEY) || '[]'));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function markRemoteProjectDeleted(remoteProjectId: string) {
+  const ids = getDeletedRemoteProjectIds();
+  ids.add(remoteProjectId);
+  localStorage.setItem(DELETED_REMOTE_PROJECTS_KEY, JSON.stringify([...ids]));
+}
+
+function unmarkRemoteProjectDeleted(remoteProjectId: string) {
+  const ids = getDeletedRemoteProjectIds();
+  if (!ids.delete(remoteProjectId)) return;
+  localStorage.setItem(DELETED_REMOTE_PROJECTS_KEY, JSON.stringify([...ids]));
 }
 
 async function supabaseFetch(path: string, init: RequestInit = {}, token?: string) {
   const config = assertConfigured();
-  const response = await fetch(`${config.url}${path}`, {
-    ...init,
-    headers: {
-      apikey: config.anonKey,
-      Authorization: `Bearer ${token || config.anonKey}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=representation',
-      ...(init.headers || {}),
-    },
-  });
+  const requiresUserToken = token !== undefined;
+  if (requiresUserToken && !token) {
+    throw new Error('登录凭证已失效，请退出后重新登录。');
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${config.url}${path}`, {
+      ...init,
+      headers: {
+        apikey: config.anonKey,
+        Authorization: `Bearer ${requiresUserToken ? token : config.anonKey}`,
+        'Content-Type': 'application/json',
+        ...(init.headers || {}),
+      },
+    });
+  } catch {
+    throw new Error('无法连接 Supabase。请检查 VITE_SUPABASE_URL 是否正确、当前网络是否可访问 Supabase，以及部署环境是否已经配置环境变量。');
+  }
 
   if (!response.ok) {
     const text = await response.text();
@@ -110,7 +164,8 @@ async function supabaseFetch(path: string, init: RequestInit = {}, token?: strin
   }
 
   if (response.status === 204) return null;
-  return response.json();
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
 
 function normalizeUser(payload: SupabaseAuthResponse): User {
@@ -140,6 +195,36 @@ function rowToMember(row: RemoteMemberRow, projectId: number): Omit<TeamMember, 
 
 function getRemoteRecordId(remoteProjectId: string, entityType: SyncEntityType, entityId: number) {
   return `${remoteProjectId}:${entityType}:${entityId}`;
+}
+
+async function resolveChangeRemoteProjectId(change: SyncChange): Promise<string | null> {
+  if (change.remoteProjectId) return change.remoteProjectId;
+  if (typeof change.payload.remoteProjectId === 'string') return change.payload.remoteProjectId;
+
+  const projectId = change.entityType === 'projects' ? change.entityId : change.projectId;
+  if (!projectId) return null;
+  const project = await db.projects.get(projectId);
+  return project?.remoteProjectId ?? null;
+}
+
+async function getSyncablePendingChanges(): Promise<SyncChange[]> {
+  const changes = await db.syncChanges.toArray();
+  const syncable: SyncChange[] = [];
+
+  for (const change of changes) {
+    const remoteProjectId = await resolveChangeRemoteProjectId(change);
+    if (remoteProjectId || change.conflict) {
+      syncable.push(remoteProjectId && !change.remoteProjectId ? { ...change, remoteProjectId } : change);
+    } else if (change.id) {
+      await db.syncChanges.delete(change.id);
+    }
+  }
+
+  return syncable;
+}
+
+export async function getCloudPendingChangeCount() {
+  return (await getSyncablePendingChanges()).length;
 }
 
 export function loadCloudSession(): CloudSession | null {
@@ -199,7 +284,7 @@ export async function signUpWithEmail(email: string, password: string, displayNa
 async function fetchSharedProjectRows(session: CloudSession): Promise<{ projects: RemoteProjectRow[]; members: RemoteMemberRow[] }> {
   const config = assertConfigured();
   const email = encodeURIComponent(session.user.email);
-  const userId = encodeURIComponent(session.user.id);
+  const userId = encodeURIComponent(getSessionAuthUserId(session));
   const memberQuery = `/rest/v1/${config.memberTable}?select=*&or=(user_id.eq.${userId},email.eq.${email})`;
   const members = await supabaseFetch(memberQuery, { method: 'GET' }, session.accessToken) as RemoteMemberRow[];
   const projectIds = [...new Set(members.map(member => member.project_id).filter(Boolean))];
@@ -212,9 +297,11 @@ async function fetchSharedProjectRows(session: CloudSession): Promise<{ projects
 
 export async function importSharedProjects(session: CloudSession): Promise<number[]> {
   const { projects, members } = await fetchSharedProjectRows(session);
+  const deletedRemoteProjectIds = getDeletedRemoteProjectIds();
   const localProjectIds: number[] = [];
 
   for (const remoteProject of projects) {
+    if (deletedRemoteProjectIds.has(remoteProject.id)) continue;
     const existing = await db.projects.where('remoteProjectId').equals(remoteProject.id).first();
     let localId = existing?.id;
     const payload = {
@@ -249,8 +336,7 @@ async function getRemoteRecords(session: CloudSession, remoteProjectIds: string[
   const config = assertConfigured();
   if (remoteProjectIds.length === 0) return [];
   const ids = remoteProjectIds.map(id => `"${id}"`).join(',');
-  const query = `/rest/v1/${config.syncTable}?select=*&remote_project_id=in.(${encodeURIComponent(ids)})`;
-  return supabaseFetch(query, { method: 'GET' }, session.accessToken) as Promise<RemoteRecord[]>;
+  return supabaseFetch(`/rest/v1/${config.syncTable}?select=*&remote_project_id=in.(${encodeURIComponent(ids)})`, { method: 'GET' }, session.accessToken) as Promise<RemoteRecord[]>;
 }
 
 async function pushEntitySnapshot(
@@ -263,9 +349,10 @@ async function pushEntitySnapshot(
   updatedAt: string
 ) {
   const config = assertConfigured();
+  const authUserId = getSessionAuthUserId(session);
   const record = {
     id: getRemoteRecordId(remoteProjectId, entityType, entityId),
-    user_id: session.user.id,
+    user_id: authUserId,
     remote_project_id: remoteProjectId,
     entity_type: entityType,
     entity_id: entityId,
@@ -282,9 +369,23 @@ async function pushEntitySnapshot(
   }, session.accessToken);
 }
 
+export async function deleteRemoteProjectFromCloud(session: CloudSession, remoteProjectId: string) {
+  const config = assertConfigured();
+  markRemoteProjectDeleted(remoteProjectId);
+  await supabaseFetch(`/rest/v1/${config.syncTable}?remote_project_id=eq.${encodeURIComponent(remoteProjectId)}`, { method: 'DELETE' }, session.accessToken);
+  await supabaseFetch(`/rest/v1/${config.memberTable}?project_id=eq.${encodeURIComponent(remoteProjectId)}`, { method: 'DELETE' }, session.accessToken);
+  await supabaseFetch(`/rest/v1/${config.projectTable}?id=eq.${encodeURIComponent(remoteProjectId)}`, { method: 'DELETE' }, session.accessToken);
+}
+
 async function pushChange(change: SyncChange, session: CloudSession): Promise<boolean> {
-  const remoteProjectId = change.remoteProjectId || (change.projectId ? (await db.projects.get(change.projectId))?.remoteProjectId : null);
+  const remoteProjectId = await resolveChangeRemoteProjectId(change);
   if (!remoteProjectId) return false;
+
+  if (change.entityType === 'projects' && change.operation === 'delete') {
+    await deleteRemoteProjectFromCloud(session, remoteProjectId);
+    return true;
+  }
+
   await pushEntitySnapshot(
     session,
     remoteProjectId,
@@ -294,11 +395,12 @@ async function pushChange(change: SyncChange, session: CloudSession): Promise<bo
     change.payload,
     change.localUpdatedAt
   );
+
   if (change.operation === 'delete') {
     const config = assertConfigured();
     await supabaseFetch(`/rest/v1/${config.syncTable}?id=eq.${encodeURIComponent(getRemoteRecordId(remoteProjectId, change.entityType, change.entityId))}`, {
       method: 'PATCH',
-      body: JSON.stringify({ deleted_at: change.localUpdatedAt, updated_at: change.localUpdatedAt, user_id: session.user.id, client_id: getClientId() }),
+      body: JSON.stringify({ deleted_at: change.localUpdatedAt, updated_at: change.localUpdatedAt, user_id: getSessionAuthUserId(session), client_id: getClientId() }),
     }, session.accessToken);
   }
   return true;
@@ -372,27 +474,34 @@ async function applyRemoteRecord(record: RemoteRecord, pending: SyncChange[]) {
 
 export async function runCloudSync(session: CloudSession): Promise<SyncState> {
   if (!navigator.onLine) {
-    const pendingChanges = await db.syncChanges.count();
+    const pendingChanges = await getCloudPendingChangeCount();
     return { lastSyncedAt: localStorage.getItem('devtrack-last-synced-at'), pendingChanges, syncStatus: 'offline' };
+  }
+
+  const pendingBeforeImport = await getSyncablePendingChanges();
+  for (const change of pendingBeforeImport.filter(change => change.entityType === 'projects' && change.operation === 'delete')) {
+    const pushed = await pushChange(change, session);
+    if (pushed && change.id) await db.syncChanges.delete(change.id);
   }
 
   await importSharedProjects(session);
 
   const remoteProjectIds = [...new Set((await db.projects.toArray()).map(project => project.remoteProjectId).filter(Boolean) as string[])];
-  const pending = await db.syncChanges.toArray();
+  const pending = await getSyncablePendingChanges();
   for (const change of pending) {
     const pushed = await pushChange(change, session);
     if (pushed && change.id) await db.syncChanges.delete(change.id);
   }
 
   const remoteRecords = await getRemoteRecords(session, remoteProjectIds);
-  const remainingPending = await db.syncChanges.toArray();
+  const remainingPending = await getSyncablePendingChanges();
   for (const record of remoteRecords) {
     await applyRemoteRecord(record, remainingPending);
   }
 
-  const pendingChanges = await db.syncChanges.count();
-  const conflicts = await db.syncChanges.where('conflict').equals(1).count();
+  const finalPending = await getSyncablePendingChanges();
+  const pendingChanges = finalPending.length;
+  const conflicts = finalPending.filter(change => change.conflict).length;
   const lastSyncedAt = new Date().toISOString();
   localStorage.setItem('devtrack-last-synced-at', lastSyncedAt);
   return {
@@ -424,32 +533,23 @@ export async function publishProjectToCloud(session: CloudSession, project: Proj
   const config = assertConfigured();
   const remoteId = project.remoteProjectId || crypto.randomUUID();
   const now = new Date().toISOString();
+  const authUserId = getSessionAuthUserId(session);
+  if (!authUserId) {
+    throw new Error('登录状态缺少 Supabase 用户 ID，请重新登录后再发布共享项目。');
+  }
   const remoteProject = {
-    id: remoteId,
-    owner_id: session.user.id,
-    name: project.name,
-    payload: { ...project, remoteProjectId: remoteId },
-    created_at: project.createdAt || now,
-    updated_at: now,
+    p_project_id: remoteId,
+    p_name: project.name,
+    p_payload: { ...project, remoteProjectId: remoteId },
+    p_created_at: project.createdAt || now,
+    p_email: session.user.email,
+    p_display_name: session.user.displayName,
   };
-  await supabaseFetch(`/rest/v1/${config.projectTable}?on_conflict=id`, {
+  await supabaseFetch('/rest/v1/rpc/devtrack_publish_project', {
     method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
     body: JSON.stringify(remoteProject),
   }, session.accessToken);
-  await supabaseFetch(`/rest/v1/${config.memberTable}?on_conflict=project_id,user_id`, {
-    method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
-    body: JSON.stringify({
-      project_id: remoteId,
-      user_id: session.user.id,
-      role: 'owner',
-      email: session.user.email,
-      display_name: session.user.displayName,
-      joined_at: now,
-      last_seen_at: now,
-    }),
-  }, session.accessToken);
+  unmarkRemoteProjectDeleted(remoteId);
 
   await db.projects.update(project.id!, { remoteProjectId: remoteId, updatedAt: now });
   const updatedProject = await db.projects.get(project.id!);
@@ -476,11 +576,11 @@ export async function publishProjectToCloud(session: CloudSession, project: Proj
     if (entry.id) await pushEntitySnapshot(session, remoteId, 'diaryEntries', entry.id, entry.projectId, entry as unknown as Record<string, unknown>, entry.updatedAt);
   }
 
-  const existing = await db.teamMembers.where({ projectId: project.id!, userId: session.user.id }).first();
+  const existing = await db.teamMembers.where({ projectId: project.id!, userId: authUserId }).first();
   if (!existing) {
     await db.teamMembers.add({
       projectId: project.id!,
-      userId: session.user.id,
+      userId: authUserId,
       role: 'owner',
       email: session.user.email,
       displayName: session.user.displayName,
@@ -492,7 +592,7 @@ export async function publishProjectToCloud(session: CloudSession, project: Proj
   await recordCollaborationEvent({
     projectId: project.id!,
     remoteProjectId: remoteId,
-    userId: session.user.id,
+    userId: authUserId,
     userName: session.user.displayName,
     type: 'project_shared',
     targetType: 'project',
@@ -546,8 +646,9 @@ export function buildRemoteInviteUrl(remoteProjectId: string, role: TeamMember['
 }
 
 export async function joinRemoteProject(session: CloudSession, remoteProjectId: string, role: TeamMember['role']) {
+  const authUserId = getSessionAuthUserId(session);
   await upsertRemoteMember(session, remoteProjectId, {
-    userId: session.user.id,
+    userId: authUserId,
     role,
     email: session.user.email,
     displayName: session.user.displayName,

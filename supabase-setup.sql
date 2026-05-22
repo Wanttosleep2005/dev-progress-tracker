@@ -1,106 +1,172 @@
--- ============================================
--- Dev Progress Tracker - Supabase 数据库设置
--- ============================================
--- 使用方法：
--- 1. 访问 https://supabase.com 登录或注册
--- 2. 创建新项目（免费版足够）
--- 3. 进入左侧 SQL Editor
--- 4. 复制粘贴此脚本并运行
--- ============================================
+-- Dev Progress Tracker cloud sync setup script.
+-- Paste this whole file into Supabase SQL Editor and run it once.
+-- Warning: this drops existing cloud collaboration/sync tables and all cloud data.
 
--- ============================================
--- 1. 同步记录表
--- ============================================
-CREATE TABLE IF NOT EXISTS devtrack_sync_records (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  remote_project_id TEXT,
-  entity_type TEXT NOT NULL,
-  entity_id INTEGER NOT NULL,
-  project_id INTEGER,
-  payload JSONB DEFAULT '{}',
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-  deleted_at TIMESTAMPTZ,
-  client_id TEXT NOT NULL
+begin;
+
+-- Drop existing tables and functions
+drop table if exists public.devtrack_sync_records cascade;
+drop table if exists public.devtrack_project_members cascade;
+drop table if exists public.devtrack_projects cascade;
+
+drop function if exists public.devtrack_touch_updated_at() cascade;
+drop function if exists public.devtrack_is_project_member(text, text[]) cascade;
+drop function if exists public.devtrack_can_edit_project(text) cascade;
+drop function if exists public.devtrack_is_project_owner(text) cascade;
+
+-- Create projects table
+create table public.devtrack_projects (
+  id text primary key,
+  owner_id text not null,
+  name text not null,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
--- 启用行级安全策略
-ALTER TABLE devtrack_sync_records ENABLE ROW LEVEL SECURITY;
-
--- 创建访问策略
-DROP POLICY IF EXISTS "Allow authenticated insert" ON devtrack_sync_records;
-DROP POLICY IF EXISTS "Allow authenticated update" ON devtrack_sync_records;
-DROP POLICY IF EXISTS "Allow authenticated delete" ON devtrack_sync_records;
-
-CREATE POLICY "Allow authenticated insert" ON devtrack_sync_records FOR INSERT WITH CHECK (auth.role() = 'authenticated');
-CREATE POLICY "Allow authenticated update" ON devtrack_sync_records FOR UPDATE USING (auth.role() = 'authenticated');
-CREATE POLICY "Allow authenticated delete" ON devtrack_sync_records FOR DELETE USING (auth.role() = 'authenticated');
-
--- 创建索引
-CREATE INDEX IF NOT EXISTS idx_sync_user_id ON devtrack_sync_records(user_id);
-CREATE INDEX IF NOT EXISTS idx_sync_entity ON devtrack_sync_records(entity_type, entity_id);
-CREATE INDEX IF NOT EXISTS idx_sync_project ON devtrack_sync_records(project_id);
-CREATE INDEX IF NOT EXISTS idx_sync_remote_project ON devtrack_sync_records(remote_project_id);
-
--- ============================================
--- 2. 共享项目表
--- ============================================
-CREATE TABLE IF NOT EXISTS devtrack_projects (
-  id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL,
-  name TEXT NOT NULL,
-  payload JSONB DEFAULT '{}',
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+-- Create project members table
+create table public.devtrack_project_members (
+  project_id text not null references public.devtrack_projects(id) on delete cascade,
+  user_id text not null,
+  role text not null default 'viewer' check (role in ('owner', 'editor', 'viewer')),
+  email text,
+  display_name text,
+  joined_at timestamptz not null default now(),
+  last_seen_at timestamptz,
+  primary key (project_id, user_id)
 );
 
--- 启用 RLS
-ALTER TABLE devtrack_projects ENABLE ROW LEVEL SECURITY;
-
--- 创建访问策略
-DROP POLICY IF EXISTS "Projects insert" ON devtrack_projects;
-DROP POLICY IF EXISTS "Projects update" ON devtrack_projects;
-DROP POLICY IF EXISTS "Projects delete" ON devtrack_projects;
-DROP POLICY IF EXISTS "Projects select" ON devtrack_projects;
-
-CREATE POLICY "Projects insert" ON devtrack_projects FOR INSERT WITH CHECK (auth.role() = 'authenticated');
-CREATE POLICY "Projects update" ON devtrack_projects FOR UPDATE USING (auth.role() = 'authenticated');
-CREATE POLICY "Projects delete" ON devtrack_projects FOR DELETE USING (auth.role() = 'authenticated');
-CREATE POLICY "Projects select" ON devtrack_projects FOR SELECT USING (true);
-
--- 创建索引
-CREATE INDEX IF NOT EXISTS idx_projects_owner ON devtrack_projects(owner_id);
-
--- ============================================
--- 3. 项目成员表
--- ============================================
-CREATE TABLE IF NOT EXISTS devtrack_project_members (
-  project_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'viewer',
-  email TEXT,
-  display_name TEXT,
-  joined_at TIMESTAMPTZ DEFAULT NOW(),
-  last_seen_at TIMESTAMPTZ,
-  PRIMARY KEY (project_id, user_id)
+-- Create sync records table
+create table public.devtrack_sync_records (
+  id text primary key,
+  user_id text not null,
+  remote_project_id text not null references public.devtrack_projects(id) on delete cascade,
+  entity_type text not null check (entity_type in ('projects', 'tasks', 'milestones', 'timelineEvents', 'diaryEntries')),
+  entity_id integer not null,
+  project_id integer,
+  payload jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  client_id text not null
 );
 
--- 启用 RLS
-ALTER TABLE devtrack_project_members ENABLE ROW LEVEL SECURITY;
+-- Create indexes
+create index idx_devtrack_projects_owner on public.devtrack_projects(owner_id);
+create index idx_devtrack_projects_updated on public.devtrack_projects(updated_at desc);
+create index idx_devtrack_members_project on public.devtrack_project_members(project_id);
+create index idx_devtrack_members_user on public.devtrack_project_members(user_id);
+create index idx_devtrack_members_email on public.devtrack_project_members(lower(email));
+create index idx_devtrack_sync_remote_project on public.devtrack_sync_records(remote_project_id);
+create index idx_devtrack_sync_entity on public.devtrack_sync_records(remote_project_id, entity_type, entity_id);
+create index idx_devtrack_sync_updated on public.devtrack_sync_records(updated_at desc);
+create index idx_devtrack_sync_user on public.devtrack_sync_records(user_id);
 
--- 创建访问策略
-DROP POLICY IF EXISTS "Members insert" ON devtrack_project_members;
-DROP POLICY IF EXISTS "Members update" ON devtrack_project_members;
-DROP POLICY IF EXISTS "Members delete" ON devtrack_project_members;
-DROP POLICY IF EXISTS "Members select" ON devtrack_project_members;
+-- Trigger for auto-updating updated_at
+create function public.devtrack_touch_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
 
-CREATE POLICY "Members insert" ON devtrack_project_members FOR INSERT WITH CHECK (auth.role() = 'authenticated');
-CREATE POLICY "Members update" ON devtrack_project_members FOR UPDATE USING (auth.role() = 'authenticated');
-CREATE POLICY "Members delete" ON devtrack_project_members FOR DELETE USING (auth.role() = 'authenticated');
-CREATE POLICY "Members select" ON devtrack_project_members FOR SELECT USING (true);
+create trigger devtrack_projects_touch_updated_at
+before update on public.devtrack_projects
+for each row
+execute function public.devtrack_touch_updated_at();
 
--- 创建索引
-CREATE INDEX IF NOT EXISTS idx_members_project ON devtrack_project_members(project_id);
-CREATE INDEX IF NOT EXISTS idx_members_user ON devtrack_project_members(user_id);
+-- Helper functions
+create function public.devtrack_is_project_member(project_id_arg text, allowed_roles text[] default null)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.devtrack_projects p
+    where p.id = project_id_arg
+      and p.owner_id = auth.uid()::text
+  )
+  or exists (
+    select 1
+    from public.devtrack_project_members m
+    where m.project_id = project_id_arg
+      and (
+        m.user_id = auth.uid()::text
+        or lower(coalesce(m.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+      )
+      and (allowed_roles is null or m.role = any(allowed_roles))
+  );
+$$;
 
-SELECT '✅ DevTrack 数据库设置完成！' AS status;
+create function public.devtrack_is_project_owner(project_id_arg text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.devtrack_projects p
+    where p.id = project_id_arg
+      and p.owner_id = auth.uid()::text
+  )
+  or exists (
+    select 1
+    from public.devtrack_project_members m
+    where m.project_id = project_id_arg
+      and m.role = 'owner'
+      and (
+        m.user_id = auth.uid()::text
+        or lower(coalesce(m.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+      )
+  );
+$$;
+
+create function public.devtrack_can_edit_project(project_id_arg text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.devtrack_is_project_member(project_id_arg, array['owner', 'editor']);
+$$;
+
+-- Enable RLS
+alter table public.devtrack_projects enable row level security;
+alter table public.devtrack_project_members enable row level security;
+alter table public.devtrack_sync_records enable row level security;
+
+-- RLS policies for devtrack_projects
+create policy "devtrack_projects_select" on public.devtrack_projects for select to authenticated using (public.devtrack_is_project_member(id, null));
+create policy "devtrack_projects_insert" on public.devtrack_projects for insert to authenticated with check (owner_id = auth.uid()::text);
+create policy "devtrack_projects_update" on public.devtrack_projects for update to authenticated using (owner_id = auth.uid()::text) with check (owner_id = auth.uid()::text);
+create policy "devtrack_projects_delete" on public.devtrack_projects for delete to authenticated using (public.devtrack_is_project_owner(id));
+
+-- RLS policies for devtrack_project_members
+create policy "devtrack_members_select" on public.devtrack_project_members for select to authenticated using (public.devtrack_is_project_member(project_id, null));
+create policy "devtrack_members_insert" on public.devtrack_project_members for insert to authenticated with check (public.devtrack_is_project_owner(project_id) or (role in ('editor', 'viewer') and (user_id = auth.uid()::text or lower(coalesce(email, '')) = lower(coalesce(auth.jwt() ->> 'email', '')))));
+create policy "devtrack_members_update" on public.devtrack_project_members for update to authenticated using (public.devtrack_is_project_owner(project_id)) with check (public.devtrack_is_project_owner(project_id));
+create policy "devtrack_members_delete" on public.devtrack_project_members for delete to authenticated using (public.devtrack_is_project_owner(project_id) or user_id = auth.uid()::text or lower(coalesce(email, '')) = lower(coalesce(auth.jwt() ->> 'email', '')));
+
+-- RLS policies for devtrack_sync_records
+create policy "devtrack_sync_select" on public.devtrack_sync_records for select to authenticated using (public.devtrack_is_project_member(remote_project_id, null));
+create policy "devtrack_sync_insert" on public.devtrack_sync_records for insert to authenticated with check (user_id = auth.uid()::text and ((entity_type in ('projects', 'milestones') and public.devtrack_is_project_owner(remote_project_id)) or (entity_type not in ('projects', 'milestones') and public.devtrack_can_edit_project(remote_project_id))));
+create policy "devtrack_sync_update" on public.devtrack_sync_records for update to authenticated using ((entity_type in ('projects', 'milestones') and public.devtrack_is_project_owner(remote_project_id)) or (entity_type not in ('projects', 'milestones') and public.devtrack_can_edit_project(remote_project_id))) with check ((entity_type in ('projects', 'milestones') and public.devtrack_is_project_owner(remote_project_id)) or (entity_type not in ('projects', 'milestones') and public.devtrack_can_edit_project(remote_project_id)));
+create policy "devtrack_sync_delete" on public.devtrack_sync_records for delete to authenticated using ((entity_type in ('projects', 'milestones') and public.devtrack_is_project_owner(remote_project_id)) or (entity_type not in ('projects', 'milestones') and public.devtrack_can_edit_project(remote_project_id)));
+
+-- Grant permissions
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on public.devtrack_projects to authenticated;
+grant select, insert, update, delete on public.devtrack_project_members to authenticated;
+grant select, insert, update, delete on public.devtrack_sync_records to authenticated;
+
+commit;
+
+select 'DevTrack cloud tables setup completed successfully!' as status;
