@@ -16,6 +16,8 @@ import { useStatsStore } from '../../stores/useStatsStore';
 import { useCommandPalette } from '../../stores/useCommandPalette';
 import { analyzeProjectRisk, formatRiskToast } from '../../lib/riskAnalysis';
 import { useInitPreferences } from '../../stores/usePreferences';
+import { useCloudStore } from '../../stores/useCloudStore';
+import { useNotificationStore } from '../../stores/useNotificationStore';
 
 const PAGE_TITLES: Record<string, string> = {
   '/': '概览',
@@ -23,10 +25,13 @@ const PAGE_TITLES: Record<string, string> = {
   '/today-tasks': '今日任务',
   '/focus-sessions': '专注记录',
   '/tasks': '任务看板',
+  '/pomodoro': '番茄钟',
   '/milestones': '里程碑',
   '/timeline': '时间线',
   '/diary': '开发日志',
   '/analytics': '数据分析',
+  '/gantt': '甘特图',
+  '/collaboration': '团队协作',
   '/projects': '项目管理',
   '/settings': '设置',
 };
@@ -61,12 +66,31 @@ export default function Layout() {
   const diaryEntries = useDiaryStore(state => state.entries);
   const { toasts, add: addToast } = useToast();
   const { openPalette, query, setQuery } = useCommandPalette();
+  const initCloud = useCloudStore(state => state.init);
+  const syncNow = useCloudStore(state => state.syncNow);
+  const syncState = useCloudStore(state => state.syncState);
+  const initNotifications = useNotificationStore(state => state.init);
+  const checkTaskNotifications = useNotificationStore(state => state.checkTaskNotifications);
   const [riskToastCache] = useState<Set<string>>(() => new Set());
   const [taskToastCache] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     useStatsStore.getState().loadSessions();
+    initCloud();
+    initNotifications();
   }, []);
+
+  useEffect(() => {
+    const handleOnline = () => syncNow();
+    window.addEventListener('online', handleOnline);
+    const timer = setInterval(() => {
+      syncNow();
+    }, 60000);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      clearInterval(timer);
+    };
+  }, [syncNow]);
 
   useEffect(() => {
     loadProjects();
@@ -130,6 +154,12 @@ export default function Layout() {
   }, [currentProjectId, addToast, taskToastCache]);
 
   useEffect(() => {
+    checkTaskNotifications(taskItems);
+    const timer = setInterval(() => checkTaskNotifications(useTaskStore.getState().tasks), 60000);
+    return () => clearInterval(timer);
+  }, [taskItems, checkTaskNotifications]);
+
+  useEffect(() => {
     if (!currentProjectId) return;
     const project = projects.find(item => item.id === currentProjectId);
     if (!project) return;
@@ -169,6 +199,26 @@ export default function Layout() {
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="flex items-center gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-xs text-slate-400">
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    syncState.syncStatus === 'synced'
+                      ? 'bg-emerald-400'
+                      : syncState.syncStatus === 'syncing'
+                        ? 'bg-cyan-400'
+                        : syncState.syncStatus === 'conflict'
+                          ? 'bg-amber-400'
+                          : 'bg-slate-500'
+                  }`}
+                />
+                {syncState.syncStatus === 'synced'
+                  ? '已同步'
+                  : syncState.syncStatus === 'syncing'
+                    ? `待同步 ${syncState.pendingChanges}`
+                    : syncState.syncStatus === 'conflict'
+                      ? '存在冲突'
+                      : '离线'}
+              </div>
               <div className="relative w-full sm:w-[340px]">
                 <Search size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input

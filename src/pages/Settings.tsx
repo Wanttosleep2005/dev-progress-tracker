@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Database, Download, FileText, Info, Settings, Sparkles, Trash2, Trophy, Upload } from 'lucide-react';
+import { Bell, Database, Download, FileText, Info, Settings, Sparkles, Trash2, Trophy, Upload } from 'lucide-react';
 import { db } from '../db/database';
 import { buildWeeklyReport } from '../lib/reporting';
 import { useAppStore } from '../stores/useAppStore';
@@ -9,6 +9,7 @@ import { useMilestoneStore } from '../stores/useMilestoneStore';
 import { useTaskStore } from '../stores/useTaskStore';
 import { useTheme } from '../stores/useTheme';
 import { usePreferences } from '../stores/usePreferences';
+import { useNotificationStore } from '../stores/useNotificationStore';
 
 export default function SettingsPage() {
   const { achievements, currentProjectId, projects } = useAppStore();
@@ -17,6 +18,7 @@ export default function SettingsPage() {
   const diaryEntries = useDiaryStore(state => state.entries);
   const { theme, setTheme } = useTheme();
   const { animationsEnabled, setAnimationsEnabled } = usePreferences();
+  const { settings: notificationSettings, requestPermission, updateSettings } = useNotificationStore();
   const [message, setMessage] = useState('');
   const [version, setVersion] = useState('0.0.0');
 
@@ -187,6 +189,71 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="glass rounded-3xl p-5">
+        <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <Bell size={16} className="text-cyan-300" />
+          浏览器通知
+        </h3>
+        <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-white">通知权限：{notificationSettings.permission}</p>
+            <p className="mt-1 text-xs text-slate-500">用于任务到期、今日任务和番茄钟阶段提醒。</p>
+          </div>
+          <button
+            onClick={notificationSettings.permission === 'granted' ? () => updateSettings({ enabled: !notificationSettings.enabled }) : requestPermission}
+            className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200 hover:bg-cyan-500/20"
+          >
+            {notificationSettings.permission === 'granted' ? (notificationSettings.enabled ? '关闭通知' : '开启通知') : '请求权限'}
+          </button>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {[
+            ['taskBeforeDue', '任务提前提醒'],
+            ['taskDue', '任务到期提醒'],
+            ['todayTasks', '今日任务提醒'],
+            ['pomodoroWorkDone', '番茄完成提醒'],
+            ['pomodoroBreakDone', '休息结束提醒'],
+            ['soundEnabled', '声音提示'],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => updateSettings({ [key]: !notificationSettings[key as keyof typeof notificationSettings] } as any)}
+              className={`rounded-2xl border p-4 text-left text-sm ${
+                notificationSettings[key as keyof typeof notificationSettings]
+                  ? 'border-cyan-500/20 bg-cyan-500/10 text-cyan-200'
+                  : 'border-white/[0.06] bg-white/[0.02] text-slate-400'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <label className="text-xs text-slate-500">提前提醒
+            <select value={notificationSettings.leadMinutes} onChange={event => updateSettings({ leadMinutes: Number(event.target.value) as 15 | 30 | 60 })} className="mt-1 w-full rounded-xl border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-sm text-white">
+              <option value={15}>15 分钟</option>
+              <option value={30}>30 分钟</option>
+              <option value={60}>60 分钟</option>
+            </select>
+          </label>
+          <label className="text-xs text-slate-500">每日提醒时间
+            <input type="time" value={notificationSettings.dailyReminderTime} onChange={event => updateSettings({ dailyReminderTime: event.target.value })} className="mt-1 w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white" />
+          </label>
+          <label className="text-xs text-slate-500">静默开始
+            <input type="time" value={notificationSettings.quietStart} onChange={event => updateSettings({ quietStart: event.target.value })} className="mt-1 w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white" />
+          </label>
+          <label className="text-xs text-slate-500">静默结束
+            <input type="time" value={notificationSettings.quietEnd} onChange={event => updateSettings({ quietEnd: event.target.value })} className="mt-1 w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white" />
+          </label>
+        </div>
+        <button
+          onClick={() => updateSettings({ quietHoursEnabled: !notificationSettings.quietHoursEnabled })}
+          className={`mt-3 rounded-xl px-4 py-2 text-sm ${notificationSettings.quietHoursEnabled ? 'bg-slate-500/20 text-slate-200' : 'border border-white/[0.06] text-slate-400'}`}
+        >
+          {notificationSettings.quietHoursEnabled ? '静默时段已开启' : '开启静默时段'}
+        </button>
       </div>
 
       <div className="glass rounded-3xl p-5">

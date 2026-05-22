@@ -11,6 +11,7 @@ import { getTaskActualMinutes } from '../lib/reporting';
 import { formatDurationDeltaFromMinutes, formatDurationFromMinutes } from '../lib/duration';
 
 const AnalyticsCharts = lazy(() => import('../components/charts/AnalyticsCharts'));
+const BurndownChart = lazy(() => import('../components/charts/BurndownChart'));
 
 const moodScoreMap: Record<MoodType, number> = {
   great: 5,
@@ -301,6 +302,10 @@ export default function Analytics() {
           )}
         </div>
       </div>
+
+      <Suspense fallback={<div className="glass rounded-[28px] p-5 text-sm text-slate-500">正在加载分析图表...</div>}>
+        <BurndownChart tasks={tasks} milestones={milestones} />
+      </Suspense>
 
       <Suspense fallback={<div className="glass rounded-[28px] p-5 text-sm text-slate-500">正在加载分析图表...</div>}>
         <AnalyticsCharts

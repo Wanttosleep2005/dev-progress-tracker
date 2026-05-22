@@ -1,6 +1,18 @@
 import Dexie from 'dexie';
 import type { Table } from 'dexie';
-import type { Achievement, DiaryEntry, Milestone, Project, Task, TimelineEvent } from '../types';
+import type {
+  Achievement,
+  CollaborationEvent,
+  DiaryEntry,
+  InviteLink,
+  Milestone,
+  Project,
+  SyncChange,
+  Task,
+  TeamMember,
+  TimelineEvent,
+  User,
+} from '../types';
 
 class DevTrackDatabase extends Dexie {
   projects!: Table<Project, number>;
@@ -9,17 +21,27 @@ class DevTrackDatabase extends Dexie {
   timelineEvents!: Table<TimelineEvent, number>;
   diaryEntries!: Table<DiaryEntry, number>;
   achievements!: Table<Achievement, number>;
+  users!: Table<User, string>;
+  teamMembers!: Table<TeamMember, number>;
+  syncChanges!: Table<SyncChange, number>;
+  collaborationEvents!: Table<CollaborationEvent, number>;
+  inviteLinks!: Table<InviteLink, number>;
 
   constructor() {
     super('DevTrackDB');
-    this.version(7)
+    this.version(8)
       .stores({
         projects: '++id, status, createdAt',
-        tasks: '++id, projectId, status, priority, milestoneId, dueDate, isTodayTask, remindAt, createdAt',
+        tasks: '++id, projectId, status, priority, milestoneId, dueDate, isTodayTask, remindAt, assigneeId, createdAt',
         milestones: '++id, projectId, status, dueDate, createdAt',
         timelineEvents: '++id, projectId, type, date, relatedTaskId',
         diaryEntries: '++id, projectId, date',
         achievements: '++id, &key',
+        users: '&id, email, createdAt',
+        teamMembers: '++id, projectId, userId, role, joinedAt',
+        syncChanges: '++id, [entityType+entityId], projectId, localUpdatedAt, conflict',
+        collaborationEvents: '++id, projectId, userId, type, createdAt',
+        inviteLinks: '++id, projectId, token, createdBy, createdAt',
       })
       .upgrade(async tx => {
         const projects = await tx.table('projects').toArray();
@@ -38,6 +60,14 @@ class DevTrackDatabase extends Dexie {
           if (!('remindAt' in task)) patch.remindAt = null;
           if (!('isTodayTask' in task)) patch.isTodayTask = false;
           if (!('publishedAt' in task)) patch.publishedAt = null;
+          if (!('plannedStartAt' in task)) patch.plannedStartAt = null;
+          if (!('plannedEndAt' in task)) patch.plannedEndAt = null;
+          if (!('assigneeId' in task)) patch.assigneeId = null;
+          if (!('dependencyIds' in task)) patch.dependencyIds = [];
+          if (!('createdBy' in task)) patch.createdBy = null;
+          if (!('updatedBy' in task)) patch.updatedBy = null;
+          if (!('remoteId' in task)) patch.remoteId = null;
+          if (!('syncUpdatedAt' in task)) patch.syncUpdatedAt = task.updatedAt ?? null;
           if (Object.keys(patch).length > 0) {
             await tx.table('tasks').update(task.id, patch);
           }
@@ -45,8 +75,14 @@ class DevTrackDatabase extends Dexie {
 
         const milestones = await tx.table('milestones').toArray();
         for (const milestone of milestones) {
-          if (!('type' in milestone)) {
-            await tx.table('milestones').update(milestone.id, { type: 'progress' });
+          const patch: Partial<Milestone> = {};
+          if (!('type' in milestone)) patch.type = 'progress';
+          if (!('createdBy' in milestone)) patch.createdBy = null;
+          if (!('updatedBy' in milestone)) patch.updatedBy = null;
+          if (!('remoteId' in milestone)) patch.remoteId = null;
+          if (!('syncUpdatedAt' in milestone)) patch.syncUpdatedAt = milestone.updatedAt ?? null;
+          if (Object.keys(patch).length > 0) {
+            await tx.table('milestones').update(milestone.id, patch);
           }
         }
       });
@@ -54,6 +90,45 @@ class DevTrackDatabase extends Dexie {
 }
 
 export const db = new DevTrackDatabase();
+
+let suppressSyncTracking = false;
+
+export async function withoutSyncTracking<T>(operation: () => Promise<T>): Promise<T> {
+  suppressSyncTracking = true;
+  try {
+    return await operation();
+  } finally {
+    suppressSyncTracking = false;
+  }
+}
+
+async function queueSyncChange(
+  entityType: SyncChange['entityType'],
+  entityId: number,
+  projectId: number | null,
+  operation: SyncChange['operation'],
+  payload: Record<string, unknown>,
+  baseUpdatedAt: string | null
+) {
+  if (suppressSyncTracking) return;
+  const localUpdatedAt = new Date().toISOString();
+  const existing = await db.syncChanges.where('[entityType+entityId]').equals([entityType, entityId]).first();
+  const next: Omit<SyncChange, 'id'> = {
+    entityType,
+    entityId,
+    projectId,
+    operation,
+    payload,
+    baseUpdatedAt,
+    localUpdatedAt,
+    conflict: false,
+  };
+  if (existing?.id) {
+    await db.syncChanges.update(existing.id, next);
+  } else {
+    await db.syncChanges.add(next);
+  }
+}
 
 export async function getAllProjects(): Promise<Project[]> {
   return db.projects.orderBy('createdAt').reverse().toArray();
@@ -65,19 +140,29 @@ export async function getProject(id: number): Promise<Project | undefined> {
 
 export async function addProject(project: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>): Promise<number> {
   const now = new Date().toISOString();
-  return db.projects.add({ ...project, createdAt: now, updatedAt: now });
+  const record = { ...project, createdAt: now, updatedAt: now };
+  const id = await db.projects.add(record);
+  await queueSyncChange('projects', id, id, 'upsert', { ...record, id }, null);
+  return id;
 }
 
 export async function updateProject(id: number, changes: Partial<Project>): Promise<number> {
-  return db.projects.update(id, { ...changes, updatedAt: new Date().toISOString() });
+  const before = await db.projects.get(id);
+  const patch = { ...changes, updatedAt: new Date().toISOString() };
+  const result = await db.projects.update(id, patch);
+  const after = await db.projects.get(id);
+  if (after) await queueSyncChange('projects', id, id, 'upsert', after as unknown as Record<string, unknown>, before?.updatedAt ?? null);
+  return result;
 }
 
 export async function deleteProject(id: number): Promise<void> {
+  const before = await db.projects.get(id);
   await db.projects.delete(id);
   await db.tasks.where('projectId').equals(id).delete();
   await db.milestones.where('projectId').equals(id).delete();
   await db.timelineEvents.where('projectId').equals(id).delete();
   await db.diaryEntries.where('projectId').equals(id).delete();
+  await queueSyncChange('projects', id, id, 'delete', { id }, before?.updatedAt ?? null);
 }
 
 export async function cloneProject(id: number, newName: string): Promise<number> {
@@ -121,15 +206,25 @@ export async function getTasksByProject(projectId: number): Promise<Task[]> {
 
 export async function addTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<number> {
   const now = new Date().toISOString();
-  return db.tasks.add({ ...task, createdAt: now, updatedAt: now });
+  const record = { ...task, createdAt: now, updatedAt: now, syncUpdatedAt: now };
+  const id = await db.tasks.add(record);
+  await queueSyncChange('tasks', id, task.projectId, 'upsert', { ...record, id }, null);
+  return id;
 }
 
 export async function updateTask(id: number, changes: Partial<Task>): Promise<number> {
-  return db.tasks.update(id, { ...changes, updatedAt: new Date().toISOString() });
+  const before = await db.tasks.get(id);
+  const patch = { ...changes, updatedAt: new Date().toISOString(), syncUpdatedAt: new Date().toISOString() };
+  const result = await db.tasks.update(id, patch);
+  const after = await db.tasks.get(id);
+  if (after) await queueSyncChange('tasks', id, after.projectId, 'upsert', after as unknown as Record<string, unknown>, before?.updatedAt ?? null);
+  return result;
 }
 
 export async function deleteTask(id: number): Promise<void> {
+  const before = await db.tasks.get(id);
   await db.tasks.delete(id);
+  await queueSyncChange('tasks', id, before?.projectId ?? null, 'delete', { id }, before?.updatedAt ?? null);
 }
 
 export async function getMilestonesByProject(projectId: number): Promise<Milestone[]> {
@@ -138,15 +233,25 @@ export async function getMilestonesByProject(projectId: number): Promise<Milesto
 
 export async function addMilestone(milestone: Omit<Milestone, 'id' | 'createdAt' | 'updatedAt'>): Promise<number> {
   const now = new Date().toISOString();
-  return db.milestones.add({ ...milestone, createdAt: now, updatedAt: now });
+  const record = { ...milestone, createdAt: now, updatedAt: now, syncUpdatedAt: now };
+  const id = await db.milestones.add(record);
+  await queueSyncChange('milestones', id, milestone.projectId, 'upsert', { ...record, id }, null);
+  return id;
 }
 
 export async function updateMilestone(id: number, changes: Partial<Milestone>): Promise<number> {
-  return db.milestones.update(id, { ...changes, updatedAt: new Date().toISOString() });
+  const before = await db.milestones.get(id);
+  const patch = { ...changes, updatedAt: new Date().toISOString(), syncUpdatedAt: new Date().toISOString() };
+  const result = await db.milestones.update(id, patch);
+  const after = await db.milestones.get(id);
+  if (after) await queueSyncChange('milestones', id, after.projectId, 'upsert', after as unknown as Record<string, unknown>, before?.updatedAt ?? null);
+  return result;
 }
 
 export async function deleteMilestone(id: number): Promise<void> {
+  const before = await db.milestones.get(id);
   await db.milestones.delete(id);
+  await queueSyncChange('milestones', id, before?.projectId ?? null, 'delete', { id }, before?.updatedAt ?? null);
 }
 
 export async function getEventsByProject(projectId: number): Promise<TimelineEvent[]> {
@@ -154,7 +259,10 @@ export async function getEventsByProject(projectId: number): Promise<TimelineEve
 }
 
 export async function addEvent(event: Omit<TimelineEvent, 'id' | 'createdAt'>): Promise<number> {
-  return db.timelineEvents.add({ ...event, createdAt: new Date().toISOString() });
+  const record = { ...event, createdAt: new Date().toISOString() };
+  const id = await db.timelineEvents.add(record);
+  await queueSyncChange('timelineEvents', id, event.projectId, 'upsert', { ...record, id }, null);
+  return id;
 }
 
 export async function findEventBySource(projectId: number, sourceKey: string): Promise<TimelineEvent | undefined> {
@@ -176,7 +284,9 @@ export async function ensureSystemEvent(event: Omit<TimelineEvent, 'id' | 'creat
 }
 
 export async function deleteEvent(id: number): Promise<void> {
+  const before = await db.timelineEvents.get(id);
   await db.timelineEvents.delete(id);
+  await queueSyncChange('timelineEvents', id, before?.projectId ?? null, 'delete', { id }, null);
 }
 
 export async function getDiaryByProject(projectId: number): Promise<DiaryEntry[]> {
@@ -193,14 +303,21 @@ export async function upsertDiaryEntry(entry: Omit<DiaryEntry, 'id' | 'createdAt
 
   if (existing?.id) {
     await db.diaryEntries.update(existing.id, { ...entry, updatedAt: now });
+    const after = await db.diaryEntries.get(existing.id);
+    if (after) await queueSyncChange('diaryEntries', existing.id, entry.projectId, 'upsert', after as unknown as Record<string, unknown>, existing.updatedAt);
     return existing.id;
   }
 
-  return db.diaryEntries.add({ ...entry, createdAt: now, updatedAt: now });
+  const record = { ...entry, createdAt: now, updatedAt: now };
+  const id = await db.diaryEntries.add(record);
+  await queueSyncChange('diaryEntries', id, entry.projectId, 'upsert', { ...record, id }, null);
+  return id;
 }
 
 export async function deleteDiaryEntry(id: number): Promise<void> {
+  const before = await db.diaryEntries.get(id);
   await db.diaryEntries.delete(id);
+  await queueSyncChange('diaryEntries', id, before?.projectId ?? null, 'delete', { id }, before?.updatedAt ?? null);
 }
 
 export async function getAllAchievements(): Promise<Achievement[]> {

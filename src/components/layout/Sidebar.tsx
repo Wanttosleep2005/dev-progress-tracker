@@ -5,7 +5,9 @@ import {
   BarChart3,
   BookOpen,
   Calendar,
+  ChartNoAxesGantt,
   ChevronDown,
+  Cloud,
   FolderKanban,
   FolderOpen,
   GitBranch,
@@ -42,11 +44,14 @@ export default function Sidebar() {
     { to: '/portfolio', icon: LayoutDashboard, label: '项目总览' },
     { to: '/today-tasks', icon: AlarmClock, label: '今日任务' },
     { to: '/tasks', icon: Kanban, label: '任务看板' },
+    { to: '/pomodoro', icon: AlarmClock, label: '番茄钟' },
     { to: '/focus-sessions', icon: History, label: '专注记录' },
     { to: '/milestones', icon: FolderOpen, label: '里程碑' },
     { to: '/timeline', icon: GitBranch, label: '时间线' },
     { to: '/diary', icon: BookOpen, label: '开发日志' },
     { to: '/analytics', icon: BarChart3, label: '数据分析' },
+    { to: '/gantt', icon: ChartNoAxesGantt, label: '甘特图' },
+    { to: '/collaboration', icon: Cloud, label: '团队协作' },
   ];
 
   const handleCreate = useCallback(async () => {

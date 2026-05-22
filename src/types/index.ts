@@ -5,6 +5,20 @@ export type MoodType = 'great' | 'good' | 'meh' | 'bad' | 'terrible';
 export type ProjectStatus = 'active' | 'archived';
 export type ViewMode = 'kanban' | 'list';
 export type TaskSource = 'board' | 'daily';
+export type TeamRole = 'owner' | 'editor' | 'viewer';
+export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'conflict';
+export type SyncEntityType = 'projects' | 'tasks' | 'milestones' | 'timelineEvents' | 'diaryEntries';
+export type SyncOperation = 'upsert' | 'delete';
+export type CollaborationEventType =
+  | 'project_shared'
+  | 'member_invited'
+  | 'member_role_changed'
+  | 'task_created'
+  | 'task_completed'
+  | 'milestone_created'
+  | 'diary_created'
+  | 'comment_added';
+export type PomodoroPhase = 'work' | 'short_break' | 'long_break';
 
 export interface Project {
   id?: number;
@@ -27,6 +41,8 @@ export interface Task {
   priority: TaskPriority;
   tags: string[];
   dueDate: string | null;
+  plannedStartAt?: string | null;
+  plannedEndAt?: string | null;
   milestoneId: number | null;
   estimatedMinutes: number | null;
   url: string;
@@ -34,6 +50,12 @@ export interface Task {
   remindAt: string | null;
   isTodayTask: boolean;
   publishedAt: string | null;
+  assigneeId?: string | null;
+  dependencyIds?: number[];
+  createdBy?: string | null;
+  updatedBy?: string | null;
+  remoteId?: string | null;
+  syncUpdatedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -62,6 +84,10 @@ export interface Milestone {
   progress: number;
   status: MilestoneStatus;
   taskIds: number[];
+  createdBy?: string | null;
+  updatedBy?: string | null;
+  remoteId?: string | null;
+  syncUpdatedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -97,6 +123,108 @@ export interface Achievement {
   description: string;
   icon: string;
   unlockedAt: string | null;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  displayName: string;
+  avatarUrl?: string;
+  createdAt: string;
+}
+
+export interface TeamMember {
+  id?: number;
+  userId: string;
+  projectId: number;
+  role: TeamRole;
+  joinedAt: string;
+  email?: string;
+  displayName?: string;
+  avatarUrl?: string;
+  online?: boolean;
+  lastSeenAt?: string | null;
+}
+
+export interface SyncState {
+  lastSyncedAt: string | null;
+  pendingChanges: number;
+  syncStatus: SyncStatus;
+}
+
+export interface SyncChange {
+  id?: number;
+  entityType: SyncEntityType;
+  entityId: number;
+  projectId: number | null;
+  operation: SyncOperation;
+  payload: Record<string, unknown>;
+  baseUpdatedAt: string | null;
+  localUpdatedAt: string;
+  conflict: boolean;
+}
+
+export interface CollaborationEvent {
+  id?: number;
+  projectId: number;
+  userId: string | null;
+  userName: string;
+  type: CollaborationEventType;
+  targetType: SyncEntityType | 'members' | 'project';
+  targetId: number | string | null;
+  title: string;
+  description: string;
+  createdAt: string;
+}
+
+export interface InviteLink {
+  id?: number;
+  projectId: number;
+  token: string;
+  role: TeamRole;
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string | null;
+}
+
+export interface PomodoroConfig {
+  workMinutes: number;
+  shortBreakMinutes: number;
+  longBreakMinutes: number;
+  longBreakInterval: number;
+  dailyGoal: number;
+  showMinutesOnly: boolean;
+  soundEnabled: boolean;
+  doNotDisturb: boolean;
+  workDoneMessage: string;
+  breakDoneMessage: string;
+}
+
+export interface PomodoroSession {
+  id: string;
+  date: string;
+  phase: PomodoroPhase;
+  completed: boolean;
+  seconds: number;
+  taskId?: number | null;
+  taskTitle?: string;
+  createdAt: string;
+}
+
+export interface NotificationSettings {
+  enabled: boolean;
+  permission: NotificationPermission | 'unsupported';
+  taskBeforeDue: boolean;
+  taskDue: boolean;
+  todayTasks: boolean;
+  pomodoroWorkDone: boolean;
+  pomodoroBreakDone: boolean;
+  leadMinutes: 15 | 30 | 60;
+  dailyReminderTime: string;
+  soundEnabled: boolean;
+  quietHoursEnabled: boolean;
+  quietStart: string;
+  quietEnd: string;
 }
 
 export const ACHIEVEMENTS: Omit<Achievement, 'id' | 'unlockedAt'>[] = [
