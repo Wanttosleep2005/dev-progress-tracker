@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   AlarmClock,
   BarChart3,
+  Bot,
   BookOpen,
   Calendar,
   ChartNoAxesGantt,
@@ -52,6 +53,7 @@ export default function Sidebar() {
     { to: '/analytics', icon: BarChart3, label: '数据分析' },
     { to: '/gantt', icon: ChartNoAxesGantt, label: '甘特图' },
     { to: '/collaboration', icon: Cloud, label: '团队协作' },
+    { to: '/ai-command', icon: Bot, label: 'AI 指令' },
   ];
 
   const handleCreate = useCallback(async () => {

@@ -27,6 +27,10 @@ export default function CommandPalette() {
     { label: '时间线', to: '/timeline' },
     { label: '开发日志', to: '/diary' },
     { label: '数据分析', to: '/analytics' },
+    { label: '番茄钟', to: '/pomodoro' },
+    { label: '甘特图', to: '/gantt' },
+    { label: '团队协作', to: '/collaboration' },
+    { label: 'AI 指令中心', to: '/ai-command' },
     { label: '项目管理', to: '/projects' },
     { label: '设置', to: '/settings' },
   ];

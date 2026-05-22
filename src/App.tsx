@@ -14,6 +14,7 @@ const Diary = lazy(() => import('./pages/Diary'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Gantt = lazy(() => import('./pages/Gantt'));
 const Collaboration = lazy(() => import('./pages/Collaboration'));
+const AICommandCenter = lazy(() => import('./pages/AICommandCenter'));
 const Projects = lazy(() => import('./pages/Projects'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
 
@@ -45,6 +46,7 @@ export default function App() {
             <Route path="analytics" element={<Analytics />} />
             <Route path="gantt" element={<Gantt />} />
             <Route path="collaboration" element={<Collaboration />} />
+            <Route path="ai-command" element={<AICommandCenter />} />
             <Route path="projects" element={<Projects />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>

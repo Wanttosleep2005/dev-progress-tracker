@@ -32,6 +32,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/analytics': '数据分析',
   '/gantt': '甘特图',
   '/collaboration': '团队协作',
+  '/ai-command': 'AI 指令中心',
   '/projects': '项目管理',
   '/settings': '设置',
 };

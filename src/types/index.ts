@@ -19,6 +19,8 @@ export type CollaborationEventType =
   | 'diary_created'
   | 'comment_added';
 export type PomodoroPhase = 'work' | 'short_break' | 'long_break';
+export type AIActionType = 'create_task' | 'create_today_task' | 'create_milestone' | 'create_diary' | 'create_event' | 'configure_pomodoro';
+export type AIProvider = 'deepseek_chat' | 'custom_chat';
 
 export interface Project {
   id?: number;
@@ -225,6 +227,36 @@ export interface NotificationSettings {
   quietHoursEnabled: boolean;
   quietStart: string;
   quietEnd: string;
+}
+
+export interface AICommandSettings {
+  provider: AIProvider;
+  apiKey: string;
+  endpoint: string;
+  model: string;
+  autoSyncAfterExecute: boolean;
+}
+
+export interface AICommandAction {
+  type: AIActionType;
+  title: string;
+  description: string;
+  priority: TaskPriority;
+  dueDate: string;
+  remindAt: string;
+  estimatedMinutes: number;
+  tags: string[];
+  date: string;
+  mood: MoodType;
+  eventType: EventType;
+  milestoneType: MilestoneType;
+  targetStatus: TaskStatus;
+}
+
+export interface AICommandPlan {
+  summary: string;
+  confidence: number;
+  actions: AICommandAction[];
 }
 
 export const ACHIEVEMENTS: Omit<Achievement, 'id' | 'unlockedAt'>[] = [
