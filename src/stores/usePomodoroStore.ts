@@ -66,6 +66,7 @@ interface PomodoroStore {
   resume: () => void;
   stop: (completed?: boolean) => void;
   skipToNext: () => void;
+  skipToPrevious: () => void;
   tick: () => void;
 }
 
@@ -139,6 +140,27 @@ export const usePomodoroStore = create<PomodoroStore>((set, get) => ({
       phase: nextPhase,
       cycleCount: nextCycleCount,
       remainingSeconds: phaseMinutes(nextPhase, config) * 60,
+      state: 'idle',
+    });
+  },
+
+  skipToPrevious: () => {
+    const { config, phase, cycleCount } = get();
+    if (phase === 'work' && cycleCount === 0) {
+      set({ remainingSeconds: phaseMinutes('work', config) * 60, state: 'idle' });
+      return;
+    }
+    const previousPhase: PomodoroPhase =
+      phase === 'work'
+        ? cycleCount % config.longBreakInterval === 0
+          ? 'long_break'
+          : 'short_break'
+        : 'work';
+    const previousCycleCount = phase === 'work' ? cycleCount : Math.max(0, cycleCount - 1);
+    set({
+      phase: previousPhase,
+      cycleCount: previousCycleCount,
+      remainingSeconds: phaseMinutes(previousPhase, config) * 60,
       state: 'idle',
     });
   },

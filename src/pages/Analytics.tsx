@@ -21,6 +21,14 @@ const moodScoreMap: Record<MoodType, number> = {
   terrible: 1,
 };
 
+const moodLabels: Record<MoodType, string> = {
+  great: '很好',
+  good: '良好',
+  meh: '一般',
+  bad: '偏差',
+  terrible: '糟糕',
+};
+
 const statusOrder: TaskStatus[] = ['todo', 'in_progress', 'review', 'done'];
 const priorityOrder: TaskPriority[] = ['urgent', 'high', 'medium', 'low'];
 
@@ -333,7 +341,7 @@ export default function Analytics() {
                 return (
                   <div key={mood}>
                     <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
-                      <span>{mood}</span>
+                      <span>{moodLabels[mood]}</span>
                       <span>{count}</span>
                     </div>
                     <div className="h-2 overflow-hidden rounded-full bg-white/[0.04]">

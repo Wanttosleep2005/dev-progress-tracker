@@ -4,6 +4,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Download, Filter, GitMerge, Lo
 import { useMilestoneStore } from '../stores/useMilestoneStore';
 import { useTaskStore } from '../stores/useTaskStore';
 import { STATUS_LABELS, type Task, type TaskStatus } from '../types';
+import { getTaskDependencyIds } from '../lib/taskDependencies';
 
 type GanttScale = 'day' | 'week' | 'month';
 
@@ -147,7 +148,7 @@ export default function Gantt() {
                       <p className="truncate text-sm text-white">{task.title}</p>
                       <p className="mt-1 text-[11px] text-slate-500">{STATUS_LABELS[task.status]} · {task.assigneeId || '未分配'}</p>
                     </div>
-                    {task.dependencyIds && task.dependencyIds.length > 0 && <GitMerge size={14} className="text-amber-300" />}
+                    {getTaskDependencyIds(task).length > 0 && <GitMerge size={14} className="text-amber-300" />}
                   </button>
                   <div
                     className={`relative h-16 border-t border-white/[0.06] bg-white/[0.01] ${draggingTaskId === task.id ? 'bg-cyan-500/[0.04]' : ''}`}

@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { DiaryEntry } from '../types';
 import * as db from '../db/database';
 import { useAppStore } from './useAppStore';
+import { useCloudStore } from './useCloudStore';
+import { useToast } from './useToast';
 
 interface DiaryStore {
   entries: DiaryEntry[];
@@ -23,6 +25,10 @@ export const useDiaryStore = create<DiaryStore>((set, get) => ({
   },
 
   upsert: async (entry) => {
+    if (!useCloudStore.getState().canEdit(entry.projectId)) {
+      useToast.getState().add('你没有编辑该共享项目日记的权限。', 'warning');
+      return 0;
+    }
     const id = await db.upsertDiaryEntry(entry);
     await get().load(entry.projectId);
     await useAppStore.getState().checkAchievements();
@@ -32,6 +38,10 @@ export const useDiaryStore = create<DiaryStore>((set, get) => ({
   remove: async (id) => {
     const entries = get().entries;
     const entry = entries.find(e => e.id === id);
+    if (!useCloudStore.getState().canEdit(entry?.projectId ?? null)) {
+      useToast.getState().add('你没有删除该共享项目日记的权限。', 'warning');
+      return;
+    }
     await db.deleteDiaryEntry(id);
     if (entry) await get().load(entry.projectId);
   },

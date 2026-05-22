@@ -24,6 +24,7 @@ export type AIProvider = 'deepseek_chat' | 'custom_chat';
 
 export interface Project {
   id?: number;
+  remoteProjectId?: string | null;
   name: string;
   description: string;
   color: string;
@@ -54,6 +55,7 @@ export interface Task {
   publishedAt: string | null;
   assigneeId?: string | null;
   dependencyIds?: number[];
+  dependsOn?: number[];
   createdBy?: string | null;
   updatedBy?: string | null;
   remoteId?: string | null;
@@ -159,6 +161,7 @@ export interface SyncChange {
   entityType: SyncEntityType;
   entityId: number;
   projectId: number | null;
+  remoteProjectId?: string | null;
   operation: SyncOperation;
   payload: Record<string, unknown>;
   baseUpdatedAt: string | null;
@@ -169,6 +172,7 @@ export interface SyncChange {
 export interface CollaborationEvent {
   id?: number;
   projectId: number;
+  remoteProjectId?: string | null;
   userId: string | null;
   userName: string;
   type: CollaborationEventType;
@@ -182,11 +186,20 @@ export interface CollaborationEvent {
 export interface InviteLink {
   id?: number;
   projectId: number;
+  remoteProjectId: string;
   token: string;
   role: TeamRole;
   createdBy: string;
   createdAt: string;
   expiresAt: string | null;
+}
+
+export interface RemoteProject {
+  id: string;
+  name: string;
+  ownerId: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface PomodoroConfig {

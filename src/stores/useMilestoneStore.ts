@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { Milestone } from '../types';
 import * as db from '../db/database';
 import { useAppStore } from './useAppStore';
+import { useCloudStore } from './useCloudStore';
+import { useToast } from './useToast';
 import { recordMilestoneCompleted, recordMilestoneCreated } from '../lib/systemEvents';
 import { refreshAllMilestonesByProject, refreshMilestoneProgress } from '../lib/milestones';
 
@@ -26,6 +28,10 @@ export const useMilestoneStore = create<MilestoneStore>((set, get) => ({
   },
 
   add: async (milestone) => {
+    if (!useCloudStore.getState().canOwn(milestone.projectId)) {
+      useToast.getState().add('只有项目所有者可以创建里程碑。', 'warning');
+      return 0;
+    }
     const now = new Date().toISOString();
     const id = await db.addMilestone(milestone);
     await recordMilestoneCreated({ ...milestone, id, createdAt: now, updatedAt: now });
@@ -39,6 +45,10 @@ export const useMilestoneStore = create<MilestoneStore>((set, get) => ({
 
   update: async (id, changes) => {
     const milestone = get().milestones.find(item => item.id === id);
+    if (!useCloudStore.getState().canOwn(milestone?.projectId ?? null)) {
+      useToast.getState().add('只有项目所有者可以修改里程碑。', 'warning');
+      return;
+    }
     await db.updateMilestone(id, changes);
     if (milestone) {
       if ((changes.type ?? milestone.type) === 'progress') {
@@ -54,6 +64,10 @@ export const useMilestoneStore = create<MilestoneStore>((set, get) => ({
 
   remove: async (id) => {
     const milestone = get().milestones.find(item => item.id === id);
+    if (!useCloudStore.getState().canOwn(milestone?.projectId ?? null)) {
+      useToast.getState().add('只有项目所有者可以删除里程碑。', 'warning');
+      return;
+    }
     await db.deleteMilestone(id);
     if (milestone) {
       await get().load(milestone.projectId);

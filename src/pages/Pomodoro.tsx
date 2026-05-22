@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Bell, Coffee, Pause, Play, Settings2, SkipForward, Square, Target, TimerReset } from 'lucide-react';
+import { Bell, Coffee, Pause, Play, Settings2, SkipBack, SkipForward, Square, Target, TimerReset } from 'lucide-react';
 import { usePomodoroStore } from '../stores/usePomodoroStore';
 import { useTaskStore } from '../stores/useTaskStore';
 import { useNotificationStore } from '../stores/useNotificationStore';
@@ -67,6 +67,7 @@ export default function Pomodoro() {
     pause,
     resume,
     stop,
+    skipToPrevious,
     skipToNext,
     tick,
   } = usePomodoroStore();
@@ -171,6 +172,10 @@ export default function Pomodoro() {
             <button onClick={() => stop(false)} className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-300 hover:bg-red-500/20">
               <Square size={14} />
               提前结束
+            </button>
+            <button onClick={() => skipToPrevious()} className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm text-slate-300 hover:bg-white/[0.05]">
+              <SkipBack size={14} />
+              回到上一阶段
             </button>
             <button onClick={() => skipToNext()} className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm text-slate-300 hover:bg-white/[0.05]">
               <SkipForward size={14} />

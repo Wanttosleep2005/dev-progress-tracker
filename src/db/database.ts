@@ -29,9 +29,9 @@ class DevTrackDatabase extends Dexie {
 
   constructor() {
     super('DevTrackDB');
-    this.version(8)
+    this.version(9)
       .stores({
-        projects: '++id, status, createdAt',
+        projects: '++id, remoteProjectId, status, createdAt',
         tasks: '++id, projectId, status, priority, milestoneId, dueDate, isTodayTask, remindAt, assigneeId, createdAt',
         milestones: '++id, projectId, status, dueDate, createdAt',
         timelineEvents: '++id, projectId, type, date, relatedTaskId',
@@ -46,8 +46,11 @@ class DevTrackDatabase extends Dexie {
       .upgrade(async tx => {
         const projects = await tx.table('projects').toArray();
         for (const project of projects) {
-          if (!('deadline' in project)) {
-            await tx.table('projects').update(project.id, { deadline: null });
+          const patch: Partial<Project> = {};
+          if (!('deadline' in project)) patch.deadline = null;
+          if (!('remoteProjectId' in project)) patch.remoteProjectId = null;
+          if (Object.keys(patch).length > 0) {
+            await tx.table('projects').update(project.id, patch);
           }
         }
 
@@ -64,6 +67,7 @@ class DevTrackDatabase extends Dexie {
           if (!('plannedEndAt' in task)) patch.plannedEndAt = null;
           if (!('assigneeId' in task)) patch.assigneeId = null;
           if (!('dependencyIds' in task)) patch.dependencyIds = [];
+          if (!('dependsOn' in task)) patch.dependsOn = task.dependencyIds ?? [];
           if (!('createdBy' in task)) patch.createdBy = null;
           if (!('updatedBy' in task)) patch.updatedBy = null;
           if (!('remoteId' in task)) patch.remoteId = null;
@@ -117,6 +121,7 @@ async function queueSyncChange(
     entityType,
     entityId,
     projectId,
+    remoteProjectId: projectId ? (await db.projects.get(projectId))?.remoteProjectId ?? null : null,
     operation,
     payload,
     baseUpdatedAt,

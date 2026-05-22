@@ -5,8 +5,10 @@ import {
   CheckSquare,
   Clock3,
   Columns3,
+  GitBranch,
   Link as LinkIcon,
   List,
+  Lock,
   Plus,
   RefreshCw,
   SquarePen,
@@ -17,12 +19,14 @@ import {
 import { useAppStore } from '../stores/useAppStore';
 import { useMilestoneStore } from '../stores/useMilestoneStore';
 import { useTaskStore } from '../stores/useTaskStore';
+import { useCloudStore } from '../stores/useCloudStore';
 import { PRIORITY_COLORS, PRIORITY_LABELS, STATUS_LABELS, TASK_TEMPLATES } from '../types';
 import type { Task, TaskPriority, TaskStatus, ViewMode } from '../types';
 import { getTaskActualMinutes } from '../lib/reporting';
 import { startFocusTimer } from '../components/FocusTimer';
 import SelectField from '../components/ui/SelectField';
 import { formatDurationDeltaFromMinutes, formatDurationFromMinutes } from '../lib/duration';
+import { getBlockingTasks, getDependentTasks, getTaskDependencyIds, isTaskBlocked, normalizeDependencyIds } from '../lib/taskDependencies';
 
 const COLUMNS: TaskStatus[] = ['todo', 'in_progress', 'review', 'done'];
 
@@ -39,6 +43,7 @@ export default function TaskBoard() {
   const currentProjectId = useAppStore(state => state.currentProjectId);
   const { tasks, add, update, remove, moveStatus } = useTaskStore();
   const { milestones, refresh } = useMilestoneStore();
+  const canEditProject = useCloudStore(state => state.canEdit(currentProjectId));
 
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
   const [showAdd, setShowAdd] = useState(false);
@@ -93,6 +98,8 @@ export default function TaskBoard() {
       remindAt: null,
       isTodayTask: false,
       publishedAt: null,
+      dependencyIds: [],
+      dependsOn: [],
     });
     resetCreateForm();
   }, [add, currentProjectId, newDesc, newDueDate, newEstimatedMinutes, newMilestoneId, newPriority, newTags, newTitle, newUrl]);
@@ -158,13 +165,15 @@ export default function TaskBoard() {
     const actualMinutes = getTaskActualMinutes(task.id, task.title, task.projectId);
     const milestone = milestones.find(item => item.id === task.milestoneId);
     const isSelected = selectedIds.has(task.id ?? -1);
+    const blocked = isTaskBlocked(task, tasks);
+    const dependentCount = getDependentTasks(task, tasks).length;
 
     return (
       <motion.div
         layout
-        draggable
+        draggable={canEditProject}
         onDragStart={event => {
-          if (!task.id) return;
+          if (!task.id || !canEditProject) return;
           handleDragStart(event as unknown as ReactDragEvent<HTMLDivElement>, task.id);
         }}
         onDragEnd={() => {
@@ -180,10 +189,10 @@ export default function TaskBoard() {
                 else next.add(task.id!);
                 return next;
               })
-            : setEditingTask(task)
+            : setEditingTask({ ...task, dependsOn: getTaskDependencyIds(task), dependencyIds: getTaskDependencyIds(task) })
         }
         whileHover={batchMode ? undefined : { y: -2 }}
-        className={`group relative cursor-grab rounded-[24px] border bg-[#0e1524] p-4 transition-all active:cursor-grabbing ${
+        className={`group relative rounded-[24px] border bg-[#0e1524] p-4 transition-all ${canEditProject ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${
           draggedTaskId === task.id ? 'scale-[0.98] opacity-50' : ''
         } ${isSelected ? 'border-sky-500/40 ring-2 ring-sky-500/20' : 'border-white/[0.06] hover:border-white/[0.12]'}`}
         style={{ boxShadow: `inset 0 0 0 1px ${PRIORITY_COLORS[task.priority]}20` }}
@@ -226,6 +235,18 @@ export default function TaskBoard() {
               {tag}
             </span>
           ))}
+          {blocked && (
+            <span className="flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-1 text-[10px] text-red-300">
+              <Lock size={10} />
+              依赖未完成
+            </span>
+          )}
+          {dependentCount > 0 && (
+            <span className="flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-1 text-[10px] text-violet-300">
+              <GitBranch size={10} />
+              被 {dependentCount} 项依赖
+            </span>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-500">
@@ -392,7 +413,7 @@ export default function TaskBoard() {
                 setDragOverMilestone(milestone.id ?? null);
               }}
               onDragLeave={() => setDragOverMilestone(null)}
-              onDrop={event => handleMilestoneDrop(event, milestone.id ?? null)}
+                    onDrop={event => canEditProject && handleMilestoneDrop(event, milestone.id ?? null)}
               className={`rounded-2xl border p-4 transition-all ${dragOverMilestone === milestone.id ? 'scale-[1.01] border-cyan-400/30 bg-cyan-500/10' : 'border-white/[0.06] bg-white/[0.02]'}`}
             >
               <div className="mb-3 flex items-start justify-between gap-2">
@@ -418,7 +439,7 @@ export default function TaskBoard() {
               setDragOverMilestone(-1);
             }}
             onDragLeave={() => setDragOverMilestone(null)}
-            onDrop={event => handleMilestoneDrop(event, null)}
+            onDrop={event => canEditProject && handleMilestoneDrop(event, null)}
             className={`rounded-2xl border border-dashed p-4 transition-all ${dragOverMilestone === -1 ? 'border-slate-300/40 bg-white/[0.05]' : 'border-white/[0.08] bg-transparent'}`}
           >
             <h4 className="text-sm font-semibold text-white">未关联</h4>
@@ -438,7 +459,7 @@ export default function TaskBoard() {
                   setDragOverColumn(column.status);
                 }}
                 onDragLeave={() => setDragOverColumn(null)}
-                onDrop={event => handleColumnDrop(event, column.status)}
+                onDrop={event => canEditProject && handleColumnDrop(event, column.status)}
                 className={`flex min-h-[420px] flex-col rounded-[28px] border p-3 transition-all ${columnStyles[column.status]} ${dragOverColumn === column.status ? 'scale-[1.01] ring-2 ring-sky-500/20' : ''}`}
               >
                 <div className="mb-3 flex items-center justify-between px-2">
@@ -509,6 +530,51 @@ export default function TaskBoard() {
                   <SelectField value={editingTask.milestoneId ?? ''} onChange={event => setEditingTask({ ...editingTask, milestoneId: event.target.value ? parseInt(event.target.value) : null })} placeholder="暂不关联里程碑" options={milestoneOptions} />
                 </div>
                 <div className="lg:col-span-2 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-slate-300">依赖任务</label>
+                      <p className="mt-1 text-[11px] text-slate-500">被选中的任务完成后，当前任务才能进入进行中。</p>
+                    </div>
+                    <span className="rounded-full bg-white/[0.04] px-2 py-1 text-[10px] text-slate-400">
+                      {getTaskDependencyIds(editingTask).length} 项
+                    </span>
+                  </div>
+                  <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                    {tasks.filter(task => task.id && task.id !== editingTask.id).length === 0 ? (
+                      <p className="text-xs text-slate-500">暂无可选择的其他任务。</p>
+                    ) : (
+                      tasks.filter(task => task.id && task.id !== editingTask.id).map(task => {
+                        const ids = getTaskDependencyIds(editingTask);
+                        const checked = task.id ? ids.includes(task.id) : false;
+                        return (
+                          <label key={task.id} className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/[0.05] bg-[#0a101a] px-3 py-2 text-sm text-slate-300 hover:bg-white/[0.04]">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={event => {
+                                const nextIds = event.target.checked
+                                  ? normalizeDependencyIds([...ids, task.id!], editingTask.id)
+                                  : ids.filter(id => id !== task.id);
+                                setEditingTask({ ...editingTask, dependsOn: nextIds, dependencyIds: nextIds });
+                              }}
+                              className="h-4 w-4 rounded border-white/[0.12] bg-white/[0.04]"
+                            />
+                            <span className="min-w-0 flex-1 truncate">{task.title}</span>
+                            <span className={`rounded-full px-2 py-1 text-[10px] ${task.status === 'done' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-white/[0.04] text-slate-400'}`}>
+                              {STATUS_LABELS[task.status]}
+                            </span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                  {getBlockingTasks(editingTask, tasks).length > 0 && (
+                    <p className="mt-3 rounded-xl border border-red-500/15 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                      依赖未完成：{getBlockingTasks(editingTask, tasks).map(task => task.title).join('、')}
+                    </p>
+                  )}
+                </div>
+                <div className="lg:col-span-2 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-xs text-slate-500">工时对比</span>
                     <span className="text-xs text-slate-400">实际 {formatDurationFromMinutes(getTaskActualMinutes(editingTask.id, editingTask.title, editingTask.projectId))}</span>
@@ -532,13 +598,14 @@ export default function TaskBoard() {
                     <TimerIcon size={14} />
                     开始专注
                   </button>
-                  <button onClick={() => { if (editingTask.id) remove(editingTask.id); setEditingTask(null); }} className="rounded-xl px-4 py-2 text-sm text-red-300 hover:bg-red-500/10">
+                  <button disabled={!canEditProject} onClick={() => { if (editingTask.id) remove(editingTask.id); setEditingTask(null); }} className="rounded-xl px-4 py-2 text-sm text-red-300 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40">
                     删除任务
                   </button>
                 </div>
                 <div className="flex gap-3">
                   <button onClick={() => setEditingTask(null)} className="rounded-xl px-4 py-2 text-sm text-slate-400 hover:text-white">取消</button>
                   <button
+                    disabled={!canEditProject}
                     onClick={async () => {
                       if (editingTask.id) {
                         await update(editingTask.id, {
@@ -550,6 +617,8 @@ export default function TaskBoard() {
                           milestoneId: editingTask.milestoneId,
                           estimatedMinutes: editingTask.estimatedMinutes,
                           url: editingTask.url,
+                          dependsOn: getTaskDependencyIds(editingTask),
+                          dependencyIds: getTaskDependencyIds(editingTask),
                         });
                         if (currentProjectId) {
                           await refresh(currentProjectId);
@@ -557,7 +626,7 @@ export default function TaskBoard() {
                       }
                       setEditingTask(null);
                     }}
-                    className="flex items-center gap-2 rounded-xl bg-sky-500 px-6 py-2 text-sm font-medium text-white hover:bg-sky-600"
+                    className="flex items-center gap-2 rounded-xl bg-sky-500 px-6 py-2 text-sm font-medium text-white hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <SquarePen size={14} />
                     保存

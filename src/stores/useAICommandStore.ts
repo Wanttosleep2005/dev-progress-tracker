@@ -103,6 +103,7 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
             publishedAt: action.type === 'create_today_task' ? new Date().toISOString() : null,
             assigneeId: null,
             dependencyIds: [],
+            dependsOn: [],
             createdBy: null,
             updatedBy: null,
             remoteId: null,

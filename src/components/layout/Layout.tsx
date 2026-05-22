@@ -25,6 +25,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/today-tasks': '今日任务',
   '/focus-sessions': '专注记录',
   '/tasks': '任务看板',
+  '/dependencies': '任务依赖',
   '/pomodoro': '番茄钟',
   '/milestones': '里程碑',
   '/timeline': '时间线',
@@ -70,6 +71,7 @@ export default function Layout() {
   const initCloud = useCloudStore(state => state.init);
   const syncNow = useCloudStore(state => state.syncNow);
   const syncState = useCloudStore(state => state.syncState);
+  const loadTeam = useCloudStore(state => state.loadTeam);
   const initNotifications = useNotificationStore(state => state.init);
   const checkTaskNotifications = useNotificationStore(state => state.checkTaskNotifications);
   const [riskToastCache] = useState<Set<string>>(() => new Set());
@@ -110,7 +112,8 @@ export default function Layout() {
     loadMilestones(currentProjectId);
     loadTimeline(currentProjectId);
     loadDiary(currentProjectId);
-  }, [currentProjectId, loadTasks, loadMilestones, loadTimeline, loadDiary]);
+    loadTeam(currentProjectId);
+  }, [currentProjectId, loadTasks, loadMilestones, loadTimeline, loadDiary, loadTeam]);
 
   useEffect(() => {
     if (!currentProjectId) return;
