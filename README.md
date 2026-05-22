@@ -142,12 +142,9 @@ VITE_SUPABASE_ANON_KEY=你的anon密钥
 
 ### 步骤 3：创建数据库表
 
-在 Supabase 后台进入 **SQL Editor**，依次运行：
+在 Supabase 后台进入 **SQL Editor**，运行 `supabase-setup.sql` 文件中的内容。
 
-1. `supabase-tables.sql`（创建同步记录表）
-2. `supabase-projects.sql`（创建项目共享表）
-
-具体内容见这两个 SQL 文件。
+具体内容见 `supabase-setup.sql` 文件。
 
 ### 步骤 4：运行应用
 
