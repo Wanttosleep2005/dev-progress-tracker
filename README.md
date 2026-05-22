@@ -121,6 +121,42 @@ npm run build
 npm run lint
 ```
 
+## 云同步配置（可选）
+
+本应用支持云端同步和团队协作功能，需要配置 Supabase。
+
+### 步骤 1：创建 Supabase 项目
+
+1. 访问 [supabase.com](https://supabase.com) 注册/登录
+2. 点击 "New Project"，创建免费项目
+3. 记住生成的 **Project URL** 和 **anon public** 密钥
+
+### 步骤 2：配置环境变量
+
+在项目根目录创建 `.env` 文件：
+
+```env
+VITE_SUPABASE_URL=你的Project URL
+VITE_SUPABASE_ANON_KEY=你的anon密钥
+```
+
+### 步骤 3：创建数据库表
+
+在 Supabase 后台进入 **SQL Editor**，依次运行：
+
+1. `supabase-tables.sql`（创建同步记录表）
+2. `supabase-projects.sql`（创建项目共享表）
+
+具体内容见这两个 SQL 文件。
+
+### 步骤 4：运行应用
+
+```bash
+npm run dev
+```
+
+打开 http://localhost:5173，注册账号即可使用云同步和团队协作功能。
+
 ## 项目结构
 
 ```
