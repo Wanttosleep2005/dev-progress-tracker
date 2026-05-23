@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Calendar as CalendarIcon,
   CalendarDays,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -137,12 +138,19 @@ export default function CalendarPage() {
                   >
                     <span className={`text-xs font-medium ${isToday ? 'text-sky-300' : 'text-slate-400'}`}>{format(day, 'd')}</span>
                     <div className="mt-1 space-y-0.5">
-                      {items.tasks.slice(0, 2).map(t => (
-                        <div key={t.id} className="flex items-center gap-1" title={t.title}>
-                          <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: PRIORITY_COLORS[t.priority] }} />
-                          <span className="truncate text-[10px] text-slate-400">{t.title}</span>
-                        </div>
-                      ))}
+                      {items.tasks.slice(0, 2).map(t => {
+                        const isDone = t.status === 'done';
+                        return (
+                          <div key={t.id} className="flex items-center gap-1" title={t.title}>
+                            {isDone ? (
+                              <CheckCircle2 size={11} className="text-emerald-400 shrink-0" />
+                            ) : (
+                              <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: PRIORITY_COLORS[t.priority] }} />
+                            )}
+                            <span className={`truncate text-[10px] ${isDone ? 'text-slate-600 line-through' : 'text-slate-400'}`}>{t.title}</span>
+                          </div>
+                        );
+                      })}
                       {items.milestones.slice(0, 1).map(m => (
                         <div key={m.id} className="flex items-center gap-1" title={m.title}>
                           <Flag size={10} className="text-amber-400 shrink-0" />
@@ -181,11 +189,16 @@ export default function CalendarPage() {
                 const items = getItemsForDate(day);
                 return (
                   <div key={idx} className={`border-r border-white/[0.03] p-1 ${idx === 6 ? 'border-r-0' : ''}`}>
-                    {items.tasks.map(t => (
-                      <div key={t.id} className="mb-1 rounded-md px-1.5 py-1 text-[10px] truncate" style={{ backgroundColor: `${PRIORITY_COLORS[t.priority]}15`, color: PRIORITY_COLORS[t.priority] }} title={t.title}>
-                        {t.title}
-                      </div>
-                    ))}
+                    {items.tasks.map(t => {
+                      const isDone = t.status === 'done';
+                      return (
+                        <div key={t.id} className={`mb-1 rounded-md px-1.5 py-1 text-[10px] truncate ${isDone ? 'bg-emerald-500/8 text-emerald-400/60 line-through' : ''}`}
+                          style={isDone ? {} : { backgroundColor: `${PRIORITY_COLORS[t.priority]}15`, color: PRIORITY_COLORS[t.priority] }}
+                          title={t.title}>
+                          {t.title}
+                        </div>
+                      );
+                    })}
                     {items.milestones.map(m => (
                       <div key={m.id} className="mb-1 rounded-md bg-amber-500/10 px-1.5 py-1 text-[10px] text-amber-300 truncate" title={m.title}>
                         🚩 {m.title}
@@ -253,15 +266,18 @@ export default function CalendarPage() {
             </div>
 
             <div className="space-y-2">
-              {selectedItems.tasks.map(t => (
-                <div key={t.id} className="flex items-center gap-3 rounded-xl border border-white/[0.04] bg-white/[0.01] p-3">
-                  <ListTodo size={14} style={{ color: PRIORITY_COLORS[t.priority] }} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-white">{t.title}</p>
-                    <p className="text-[10px] text-slate-500">{STATUS_LABELS[t.status]}</p>
+              {selectedItems.tasks.map(t => {
+                const isDone = t.status === 'done';
+                return (
+                  <div key={t.id} className={`flex items-center gap-3 rounded-xl border p-3 ${isDone ? 'border-emerald-500/10 bg-emerald-500/[0.03]' : 'border-white/[0.04] bg-white/[0.01]'}`}>
+                    {isDone ? <CheckCircle2 size={14} className="text-emerald-400" /> : <ListTodo size={14} style={{ color: PRIORITY_COLORS[t.priority] }} />}
+                    <div className="min-w-0 flex-1">
+                      <p className={`truncate text-sm ${isDone ? 'text-slate-500 line-through' : 'text-white'}`}>{t.title}</p>
+                      <p className={`text-[10px] ${isDone ? 'text-emerald-400' : 'text-slate-500'}`}>{STATUS_LABELS[t.status]}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {selectedItems.milestones.map(m => (
                 <div key={m.id} className="flex items-center gap-3 rounded-xl border border-amber-500/10 bg-amber-500/[0.03] p-3">
                   <Flag size={14} className="text-amber-400" />
