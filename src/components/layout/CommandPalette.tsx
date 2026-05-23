@@ -8,6 +8,7 @@ import { useMilestoneStore } from '../../stores/useMilestoneStore';
 import { useDiaryStore } from '../../stores/useDiaryStore';
 import { useTimelineStore } from '../../stores/useTimelineStore';
 import { useCommandPalette } from '../../stores/useCommandPalette';
+import ProjectFolderIcon from '../ProjectFolderIcon';
 
 export default function CommandPalette() {
   const navigate = useNavigate();
@@ -181,7 +182,7 @@ export default function CommandPalette() {
                       onClick={() => handleOpenProject(project.id!)}
                       className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-200 transition hover:bg-white/[0.04]"
                     >
-                      <span className="text-base">{project.icon}</span>
+                      <ProjectFolderIcon name={project.name} color={project.color} size="sm" />
                       <div className="min-w-0">
                         <p className="truncate">{project.name}</p>
                         <p className="mt-0.5 truncate text-[11px] text-slate-500">{project.description || '暂无项目描述'}</p>

@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Cloud, LogIn, UserPlus } from 'lucide-react';
 import { useCloudStore } from '../stores/useCloudStore';
+import { parseRemoteInvite } from '../lib/cloudSync';
 import type { TeamRole } from '../types';
 
 interface InvitePayload {
@@ -14,11 +15,7 @@ interface InvitePayload {
 
 function decodeInvite(token?: string): InvitePayload | null {
   if (!token) return null;
-  try {
-    return JSON.parse(atob(token));
-  } catch {
-    return null;
-  }
+  return parseRemoteInvite(token);
 }
 
 const roleLabels: Record<TeamRole, string> = {
@@ -38,6 +35,7 @@ export default function Invite() {
   const [displayName, setDisplayName] = useState('');
   const [mode, setMode] = useState<'login' | 'register'>('register');
   const [authError, setAuthError] = useState('');
+  const [notice, setNotice] = useState('');
 
   const handleJoin = async () => {
     if (!invite?.remoteProjectId || !invite.role) return;
@@ -51,9 +49,10 @@ export default function Invite() {
       return;
     }
     setAuthError('');
+    setNotice('');
     try {
       if (mode === 'register') {
-        await signUp(email.trim(), password.trim(), displayName.trim() || email.trim().split('@')[0]);
+        await signUp(email.trim(), password.trim(), displayName.trim() || email.trim().split('@')[0], window.location.href);
       } else {
         await signIn(email.trim(), password.trim());
       }
@@ -63,7 +62,12 @@ export default function Invite() {
       }
       navigate('/collaboration');
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : '操作失败');
+      const message = err instanceof Error ? err.message : '操作失败';
+      if (mode === 'register' && message.includes('验证')) {
+        setNotice(`${message} 验证后请回到本邀请链接，切换到“已有账号”登录并加入项目。`);
+      } else {
+        setAuthError(message);
+      }
     }
   };
 
@@ -86,6 +90,7 @@ export default function Invite() {
             </div>
             {error && <p className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-200">{error}</p>}
             {authError && <p className="rounded-2xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">{authError}</p>}
+            {notice && <p className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-sm leading-6 text-cyan-100">{notice}</p>}
             {session ? (
               <button
                 onClick={handleJoin}
@@ -139,8 +144,13 @@ export default function Invite() {
                   className="mx-auto flex items-center gap-2 rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-medium text-white hover:bg-cyan-600 disabled:opacity-50"
                 >
                   {mode === 'register' ? <UserPlus size={16} /> : <LogIn size={16} />}
-                  {mode === 'register' ? '注册并加入项目' : '登录并加入项目'}
+                  {mode === 'register' ? '注册账号' : '登录并加入项目'}
                 </button>
+                {mode === 'register' && (
+                  <p className="text-xs leading-6 text-slate-500">
+                    如果 Supabase 已开启邮箱确认，系统会发送验证邮件；验证后回到本邀请链接登录，即可加入项目。
+                  </p>
+                )}
               </div>
             )}
           </div>

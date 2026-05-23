@@ -1,326 +1,61 @@
-# DevTrack 更新日志
-
-## v0.9.0 — 2026-05-23
-
-### 协作闭环与数据一致性
-- **共享项目发布收口**：`supabase-setup.sql` 补齐 `devtrack_publish_project` RPC，发布共享项目时由数据库函数写入项目和 Owner 成员关系，减少 RLS 首次插入失败。
-- **同步实体补全**：`SyncEntityType` 新增 `sprints`、`comments`，Sprint 与任务评论正式进入本地同步队列、云端同步记录和项目发布快照。
-- **删除闭环增强**：删除项目时同步清理任务、里程碑、时间线、日记、成员、活动流、通知、邀请、Sprint、评论和关联同步队列，降低远端/本地状态分裂。
-- **任务删除联动**：删除任务时同步清理该任务评论，并为评论删除写入同步队列，避免远端保留孤儿评论。
-
-### 数据模型与 AI 指令
-- **依赖字段收敛**：任务依赖新写入统一使用 `dependsOn`，旧版 `dependencyIds` 仅作为迁移和读取兼容来源。
-- **AI 执行校验**：AI 返回计划增加本地结构校验，缺少标题、缺少 `taskId/milestoneId` 或返回未知 action 时会阻止执行。
-- **DeepSeek 默认模型调整**：默认模型改为 `deepseek-chat`，更贴近 DeepSeek API 的通用聊天模型命名。
-- **多日时间线事件**：`TimelineEvent.endDate` 补齐迁移默认值、AI 映射和 Timeline 创建/展示入口。
-
----
-
-## v0.8.0 — 2026-05-23
-
-### 协作控制与安全治理
-- **Owner 控制中心独立化**：首次配置向导、权限落地审计、同步诊断中心从团队协作页面拆出，形成独立的协作控制入口。
-- **同步诊断中心**：增加当前用户、JWT、项目 remote id、待同步队列、冲突数量、最近错误、重试与导出诊断报告能力。
-- **活动流分页**：协作活动流等长列表统一收敛为每页 5 条，减少面板过长和信息拥挤。
-- **侧边栏权重治理**：默认导航按使用权重保留核心模块，低频模块进入可配置隐藏列表。
-
-### 备份与每日工作流
-- **备份恢复中心**：增加项目还原点、备份文件导出、目录配置和恢复入口，用于重大改动前保护本地数据。
-- **今日指挥台**：新增每日聚合工作台，集中承载今日任务、提醒、专注和节奏判断。
-
----
-
-## v0.7.0 — 2026-05-23
-
-### 🚀 重大版本：局域网协作 + 日历 + 联动生态
-
-### 局域网实时协作
-- **Radmin VPN 支持**：通过虚拟局域网实现点对点实时协作，无需公网服务器
-- **LAN IP 自动检测**：WebRTC STUN + Radmin 网卡扫描双阶段检测，自动发现可达地址
-- **邀请链接**：基于自定义基地址生成邀请链接，一键复制分享给团队成员
-- **启动脚本**：`start.bat` 集成 `--host` 参数，自动监听所有网卡接口
-
-### 日历视图
-- **月/周/日三视图**：聚合展示任务截止、里程碑节点、时间线事件
-- **日期详情弹窗**：点击任意日期弹出当天事项清单，按类型分组
-- **侧边栏显隐**：日历已加入侧边栏显隐控制
-
-### 番茄钟 × 任务联动
-- **深度绑定**：完成任务番茄自动累加 `trackedMinutes`，推进状态流转
-- **目标进度条**：设定番茄目标后实时显示完成轮数/目标轮数
-- **状态联动**：首轮番茄自动推进任务状态，达成目标自动推进至评审
-
-### AI 指令中心 v2
-- **更新操作**：支持 `update_task` / `update_milestone` 自然语言更新
-- **子任务落地**：创建和更新正确写入 `subtasks` 清单
-- **番茄配置**：`configure_pomodoro` 完整配置支持
-
-### 架构升级
-- **20 页面 + 22 组件 + 18 Store + 11 Lib**：模块化清晰
-- **数据库 v12**：pomodoroGoal 等新字段迁移
-- **代码清理**：移除 Dashboard、WorkspaceBar、MarkdownEditor、ShortcutHelp 等死代码
-- **TypeScript 零错误，Vite 构建 3664 modules**
-
----
-
-## v0.6.6 — 2026-05-23
-
-### 番茄钟 × 任务深度联动
-
-- **进度自动更新**：绑定任务后完成一轮番茄钟，自动累加 `trackedMinutes` 并推进任务状态（todo→in_progress→review）
-- **目标进度条**：番茄钟页面选中带番茄目标的任务时，实时显示已完成轮数/目标轮数和进度百分比
-- **表单新增**：任务创建/编辑表单增加「番茄目标（轮数）」字段，今日任务同步支持
-- **状态联动**：任务在 todo 状态完成首轮番茄自动进入进行中；达成目标轮数自动推进至待评审
-
-### AI 指令中心增强
-
-- **更新操作**：新增 `update_task` 和 `update_milestone` 动作，支持通过自然语言更新任务状态、优先级、截止日期、里程碑等
-- **子任务落地**：`create_task` 和 `update_task` 现在正确写入 `subtasks` 子任务清单
-- **关联加强**：任务创建/更新时可关联里程碑（`milestoneId`），支持设置番茄目标（`pomodoroGoal`）和依赖任务（`dependencyIds`）
-- **番茄配置完善**：`configure_pomodoro` 支持完整配置（工作时长、休息时长、长休息间隔、每日目标）
-- **提示词优化**：系统提示词重写，从 7 条规则扩至 9 条，新增 update_task/update_milestone 字段文档和示例
-
----
-
-## v0.6.5 — 2026-05-23
-
-### 日历视图
-- **月/周/日三视图**：全新 `/calendar` 页面，展示任务截止、里程碑节点、时间线事件
-- **日期详情弹窗**：点击任意日期弹出当天事项清单，按任务/里程碑/事件分组
-- **侧边栏隐藏**：日历已加入侧边栏显隐控制
-
-### 代码清理
-- 移除未使用的 MarkdownEditor、Dashboard、WorkspaceBar 等死代码
-- TaskBoard 回滚至稳定版本，修复 v0.6.5 早期引入的黑屏问题
-
-### 类型扩展
-- Task 新增 `pomodoroGoal` 字段（为后续番茄-任务联动预留）
-- 数据库 v12 迁移，自动补充新字段默认值
-
----
-
-## v0.6.4 — 2026-05-23
-
-### 依赖连线修复
-- **overflow 裁剪**：移除节点外层 `overflow-hidden`，Handle 移出卡片内部，从根源解决连线拖拽失效
-
-### TimePicker 层级修复
-- **fixed 居中**：弹窗改为 `fixed` 居中定位，z-index 999/1000，不被任何元素遮挡
-
----
-
-## v0.6.3 — 2026-05-23
-
-### 侧边栏隐藏修复
-- **全覆盖**：修复项目管理和成就系统无法隐藏的 bug，所有导航项统一使用 sidebarItems 过滤
-- **全部显隐**：新增「全部隐藏」「全部启用」按钮，一键控制所有导航项
-
-### 今日任务优化
-- **创建标签**：所有表单字段补全标签头（标题/说明/优先级/工时/截止/提醒/标签/循环）
-- **时间选择器**：提醒时间改用滚动式 TimePicker，精确到分钟
-
-### 依赖连线修复
-- **手柄 z-index**：所有 6 个 Handle 添加 z-10，防止被节点 accent bar 遮挡
-- **连接半径**：connectionRadius 提升至 200，适配更大的节点尺寸
-
-### 侧边栏图标美化
-- **图标容器**：每个导航图标增加圆角背景容器，激活态带发光阴影效果
-- **色彩区分**：激活态 sky-300 色 + sky-500/15 背景，非激活态 slate-400
-
-### 日期时间选择器
-- **可见性增强**：所有 date/time 输入深色主题适配，日历图标亮度提升
-- **自定义 TimePicker**：滚动式时/分双列选择器，玻璃态弹出面板，确认/清除操作
-
----
-
-## v0.6.2 — 2026-05-23
-
-### 冲刺闪烁修复
-- **根治闪烁**: 移除 forceRender 机制，拖拽状态改用纯 useRef，消除全组件重渲染
-- **性能优化**: activeSprints/planningSprints/completedSprints 改为 useMemo
-
-### 侧边栏自定义
-- **显隐控制**: 设置页新增「侧边栏显示」区域，可勾选/隐藏任意导航项
-- **持久化**: localStorage 存储隐藏项配置，刷新保留
-
-### 创建表单优化
-- **标签完善**: 任务创建/编辑、冲刺创建、项目创建等所有表单统一增加字段标签头
-- **子任务快捷创建**: 看板创建区直接支持子任务输入，回车添加
-
-### 依赖节点重设计
-- **全新外观**: 左侧状态色竖条 + 玻璃态卡片 + 图标化元数据芯片
-- **视觉减负**: 连接线细化为 2px，箭头缩小至 14px，透明度降低
-
-### 日记 Markdown 增强
-- **新增表格/图片渲染**: 支持 table/thead/th/td/img 等 Markdown 元素
-- **标题美化**: h1 添加底部渐变分隔线
-
----
-
-## v0.6.1 — 2026-05-23
-
-### 成就系统重构
-- **独立页面**：成就系统从设置页移至独立 `/achievements` 页面，侧边栏新增入口
-- **进度条可视化**：全局进度条 + 铜银金三级各自进度条，动画过渡效果
-- **设置清理**：删除设置页残留成就展示区
-
-### Bug 修复
-- **冲刺拖拽闪烁**：Sprint 任务列表提取为 `memo` 组件，消除拖拽时不必要的重渲染
-- **依赖节点手柄**：连接手柄从 24×8 缩小至 12×4，边缘手柄 8×24 缩小至 4×12，视觉更协调
-
-### AI 指令增强
-- **提示词适配**：系统提示词新增 subtasks、trackedMinutes、sprintId、成就系统等 v0.6.0 字段说明
-
-### 日记美化
-- **Markdown 增强**：表格/图片/标题获得定制暗色主题样式，h1 带渐近下划线
-- **代码块优化**：语言标签头部样式微调，行内代码高亮对比度提升
-
-### 代码清理
-- 移除未使用的 Dashboard 路由残留、WorkspaceBar 组件等冗余代码
-
----
-
-## v0.6.0 — 2026-05-23
-
-### 子任务 / Checklist
-- **任务拆分**：Task 新增 `subtasks` 字段，支持在任务内创建可勾选子任务清单
-- **进度可视化**：看板卡片显示子任务进度条，编辑弹窗内嵌完整子任务管理面板
-- **交互细节**：勾选删除线动画、回车快速添加、hover 显示删除按钮
-
-### 任务时间追踪
-- **单任务计时**：每个任务卡片新增独立计时按钮，点击开始追踪该任务耗时
-- **浮动计时器**：计时进行中显示右下角浮动面板，实时显示累计时长，支持暂停/停止
-- **自动累计**：停止计时后自动写入任务 `trackedMinutes` 字段，与全局专注计时器互斥
-- **看板集成**：任务卡片新增追踪时长列，支持预估/实际/追踪三列对比
-
-### 成就系统大扩展
-- **30+ 成就**：从 8 个扩展到 27 个成就，覆盖连续打卡、任务完成、专注时长等多维度
-- **三级等级**：铜牌 🥉 / 银牌 🥈 / 金牌 🥇 三档，视觉层次分明
-- **解锁动画**：成就解锁时弹出全屏华丽动画弹窗，Spring 动画 + 等级光效
-- **概览展示**：概览页成就区改为三列等级网格布局，未解锁灰色显示
-
-### Sprint 冲刺管理
-- **冲刺页面**：全新 `/sprints` 页面，支持创建、启动、完成冲刺周期
-- **任务关联**：任务新增 `sprintId` 字段，支持拖拽分配任务到冲刺
-- **进度追踪**：冲刺卡片显示任务完成进度条、日期范围、状态标签
-- **导航集成**：侧边栏新增「冲刺管理」入口，路由自动注册
-
-### 任务依赖图美化
-- **节点重设计**：280x160 大卡片，玻璃态效果 + 状态色边框 + 优先级徽章
-- **信息增强**：显示子任务进度条、追踪时长、依赖/被依赖计数
-- **视觉升级**：连接线加粗加发光、箭头更大更明显、迷你地图配色优化
-
-### 日记代码高亮
-- **语法高亮**：集成 `rehype-highlight`，Markdown 代码块支持 190+ 语言语法着色
-- **代码块美化**：带语言标签头部、深色代码主题、行内代码差异化样式
-- **双模式覆盖**：编辑预览和阅读模式均支持高亮
-
-### 自定义快捷键
-- **快捷键设置**：设置页新增自定义快捷键区域，支持 cmdPalette / newTask / timer / help
-- **即时生效**：修改后立即存储到 localStorage，刷新页面后保留
-
-### 数据导入扩展
-- **CSV 导入**：设置页新增 CSV 导入按钮，支持标题/描述/状态/优先级/标签/截止日期/预估工时字段映射
-- **JSON 增强**：原有 JSON 导入兼容新字段（subtasks、trackedMinutes、sprintId）
-
-### 团队仪表盘
-- **统计面板**：协作页新增团队仪表盘，展示成员数/共享项目/协作事件/同步状态
-- **成员活跃**：成员列表显示在线状态、角色标签、活跃指示器
-
-### 任务评论
-- **评论 Store**：新增 `useCommentStore`，支持按任务加载/添加/删除评论
-- **数据库表**：新增 `comments` 表（taskId, userId, userName, content, createdAt）
-
----
-
-## v0.5.1 — 2026-05-23
-
-### 开发日志重构
-
-- **文件导入**：支持导入 .md 和 .json 格式文件，自动解析日期和内容
-- **统计数据**：新增连续记录天数、总字数统计卡
-- **标签云**：左侧栏展示常用标签及使用频次
-- **最近记录**：时间线式展示最近 15 条日志，点击快速跳转
-- **实时预览**：编辑模式采用左右分栏，左侧编辑右侧 Markdown 实时渲染
-- **预览切换**：阅读模式下支持 Markdown 渲染/源码切换预览
-- **渲染强化**：代码块、引用、链接等 Markdown 元素获得定制暗色主题样式
-
----
-
-## v0.5.0 — 2026-05-23
-
-### 循环任务
-
-- **循环规则**：任务新增 `recurrence` 字段，支持每天/每周/每月循环
-- **自动生成**：循环任务完成时自动创建下一期副本（重置状态、更新截止日期）
-- **全入口覆盖**：看板创建/编辑、今日任务发布、AI 指令均支持设置循环规则
-
-### 通知中心
-
-- **通知铃铛**：侧边栏新增通知铃铛图标，显示未读计数红点
-- **下拉面板**：展示最近 50 条通知，支持标记已读/全部已读/清空
-- **事件联动**：任务完成、成员邀请、角色变更、项目发布等自动生成通知
-- **点击跳转**：点击通知可跳转到对应页面
-
-### 增强全局搜索
-
-- **搜索扩展**：Cmd+K 现在可搜索里程碑、日记内容、时间线事件
-- **分组展示**：搜索结果按类型分组（任务/项目/里程碑/日记/事件/页面）
-- **一键跳转**：点击搜索结果直接切换到对应项目并打开目标页面
-
-### 累积流图
-
-- **CFD 图表**：分析页面新增累积流图，基于任务创建日期和当前状态的面积堆叠图
-- **瓶颈识别**：各状态带宽度反映在制品数量，WIP 膨胀时可直观判断瓶颈
-
-### 项目模板
-
-- **4 套预置模板**：Web 全栈、移动端应用、开源维护、学习计划
-- **一键填充**：选择模板后自动创建任务和里程碑，预填项目名称/图标/颜色
-- **双入口**：项目管理页和侧边栏快捷创建均支持模板选择
-
----
-
-## v0.4.1 — 2026-05-23
-
-### 云同步修复
-
-- **孤儿项目自动清理**：队友同步时自动检测并清理远端已删除但本地残留的项目数据，覆盖「项目被他人删除」「被移出团队」「其他设备删项目」三种场景
-
----
-
-## v0.4.0 — 2026-05-23
-
-### AI 指令中心重大升级
-
-- **模型选择**：支持 DeepSeek V4 Flash（快速）/ V4 Pro（强力）自由切换
-- **推理力度控制**：off（关闭推理，最快）→ high（默认）→ max（最强），按需平衡质量与成本
-- **CORS 问题修复**：开发环境通过 Vite 代理转发 API 请求，彻底解决浏览器跨域拦截
-- **端点修正**：API 端点修复为 `/v1/chat/completions`，确保兼容 DeepSeek 最新 API 格式
-- **提示词深度优化**：系统提示词从单行扩至完整字段说明书，覆盖 Task/Milestone/Diary/Event/Pomodoro 全部 16 个字段，AI 不再输出空 title/description
-- **执行字段落地**：`plannedStartAt`、`plannedEndAt`、`url`、`milestoneStatus`、`relatedTaskId` 等字段从 AI 输出正确映射到数据库
-
-### 云同步修复
-
-- **JWT 过期自动刷新**：检测到 Supabase JWT 过期时自动使用 refresh_token 刷新，避免同步中断
-- **刷新失败降级**：token 刷新失败时清除登录态，提示用户重新登录
-
-### 体验优化
-
-- **下拉选择器修复**：暗色主题下 `<select>` 选项不再白底白字，`.custom-select` 样式统一控制
-- **AI 设置持久化优化**：开发环境强制走 Vite 代理路径，忽略 localStorage 中残留的旧端点 URL
-
-### 类型系统
-
-- `AICommandSettings` 新增 `reasoningEffort` 字段（off | high | max）
-- `AICommandAction` 新增 5 个字段：`milestoneStatus`、`url`、`plannedStartAt`、`plannedEndAt`、`relatedTaskId`
-
----
-
-## v0.3.0 — 2026-05
-
-- 多项目管理、任务看板、今日任务、里程碑、日记、甘特图
-- 番茄计时器、专注会话统计
-- 活动热力图、统计面板、风险预警、趋势图表
-- 团队协作 Beta：项目共享、角色权限、云端同步
-- 命令面板 (Cmd+K)、快捷键、暗色主题
+# Changelog
+
+## v0.9.1 - 2026-05-23
+
+### Added
+
+- Added `单人纯净流` in Settings. This mode disables Supabase login, cloud sync,
+  member invites, and presence heartbeats while keeping local IndexedDB workflows
+  available.
+- Added `云协作模式` as an explicit switch for teams that want Supabase-backed
+  sharing and synchronization.
+- Added account deletion beta documentation:
+  - `docs/supabase-edge-function-account-deletion.md`
+  - `docs/manual-account-deletion.md`
+- Added `scripts/deploy-supabase-edge-function.ps1` for deploying the account
+  deletion Edge Function without committing secrets.
+
+### Changed
+
+- Bumped version to `0.9.1`.
+- Rewrote README with a local-first explanation, mode guidance, Supabase setup,
+  and account deletion beta warning.
+- Moved SQL files into `supabase/sql/` and removed obsolete presence/reset SQL
+  scripts.
+- Cloud store actions now respect local-only mode and no-op instead of touching
+  Supabase.
+
+### Security
+
+- The frontend still never stores or bundles a Supabase service-role key.
+- Account deletion uses `DEVTRACK_SUPABASE_*` Edge Function secrets because
+  Supabase CLI rejects custom secrets starting with `SUPABASE_`.
+- Account deletion remains beta and should be tested with disposable accounts
+  before use on real team data.
+
+## v0.9.0 - 2026-05-23
+
+- Closed the shared project publishing flow through a Supabase RPC.
+- Added project/member/sync SQL setup under `supabase/sql/setup.sql`.
+- Expanded synced entity coverage to tasks, milestones, timeline events,
+  diary entries, sprints, and comments.
+- Improved project deletion cleanup to reduce remote/local resurrection issues.
+- Normalized task dependency data around `dependsOn`.
+- Improved DeepSeek AI command validation and default model handling.
+- Added timeline `endDate` handling.
+
+## v0.8.0 - 2026-05-23
+
+- Split owner controls, first setup guidance, permission audit, and sync
+  diagnostics into a collaboration control area.
+- Added paginated collaboration activity panels.
+- Added backup and recovery center improvements.
+- Added today command center.
+- Added sidebar visibility weighting and configuration.
+
+## Earlier Versions
+
+Earlier local development versions introduced task boards, focus timers,
+Pomodoro support, project diary, analytics, Gantt/burndown views, achievements,
+calendar, task dependencies, backup/restore, AI command execution, and LAN
+collaboration experiments.

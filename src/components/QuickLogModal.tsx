@@ -112,7 +112,7 @@ export default function QuickLogModal({ open, type, onClose }: Props) {
               }}
               options={projects.map(project => ({
                 value: project.id!,
-                label: `${project.icon} ${project.name}`,
+                label: project.name,
               }))}
             />
           </div>

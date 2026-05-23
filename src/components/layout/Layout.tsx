@@ -15,7 +15,7 @@ import { useToast } from '../../stores/useToast';
 import { useStatsStore } from '../../stores/useStatsStore';
 import { useCommandPalette } from '../../stores/useCommandPalette';
 import { analyzeProjectRisk, formatRiskToast } from '../../lib/riskAnalysis';
-import { useInitPreferences } from '../../stores/usePreferences';
+import { useInitPreferences, usePreferences } from '../../stores/usePreferences';
 import { useCloudStore } from '../../stores/useCloudStore';
 import { useNotificationStore } from '../../stores/useNotificationStore';
 
@@ -76,6 +76,7 @@ export default function Layout() {
   const touchPresence = useCloudStore(state => state.touchPresence);
   const syncState = useCloudStore(state => state.syncState);
   const loadTeam = useCloudStore(state => state.loadTeam);
+  const collaborationMode = usePreferences(state => state.collaborationMode);
   const initNotifications = useNotificationStore(state => state.init);
   const checkTaskNotifications = useNotificationStore(state => state.checkTaskNotifications);
   const [riskToastCache] = useState<Set<string>>(() => new Set());
@@ -85,7 +86,7 @@ export default function Layout() {
     useStatsStore.getState().loadSessions();
     initCloud();
     initNotifications();
-  }, []);
+  }, [initCloud, initNotifications, collaborationMode]);
 
   useEffect(() => {
     const handleOnline = () => syncNow();
@@ -209,7 +210,7 @@ export default function Layout() {
             <div className="min-w-0">
               <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-[0.22em] text-slate-500">
                 <Sparkles size={12} />
-                {currentProject ? `${currentProject.icon} ${currentProject.name}` : '项目工作监控系统'}
+                {currentProject ? currentProject.name : '项目工作监控系统'}
               </div>
               <h1 className="truncate text-xl font-semibold text-white">{pageTitle}</h1>
             </div>
@@ -218,22 +219,26 @@ export default function Layout() {
               <div className="flex items-center gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-xs text-slate-400">
                 <span
                   className={`h-2 w-2 rounded-full ${
-                    syncState.syncStatus === 'synced'
-                      ? 'bg-emerald-400'
-                      : syncState.syncStatus === 'syncing'
-                        ? 'bg-cyan-400'
-                        : syncState.syncStatus === 'conflict'
-                          ? 'bg-amber-400'
-                          : 'bg-slate-500'
+                    collaborationMode === 'local'
+                      ? 'bg-slate-400'
+                      : syncState.syncStatus === 'synced'
+                        ? 'bg-emerald-400'
+                        : syncState.syncStatus === 'syncing'
+                          ? 'bg-cyan-400'
+                          : syncState.syncStatus === 'conflict'
+                            ? 'bg-amber-400'
+                            : 'bg-slate-500'
                   }`}
                 />
-                {syncState.syncStatus === 'synced'
-                  ? '已同步'
-                  : syncState.syncStatus === 'syncing'
-                    ? `待同步 ${syncState.pendingChanges}`
-                    : syncState.syncStatus === 'conflict'
-                      ? '存在冲突'
-                      : '离线'}
+                {collaborationMode === 'local'
+                  ? '单人本地'
+                  : syncState.syncStatus === 'synced'
+                    ? '已同步'
+                    : syncState.syncStatus === 'syncing'
+                      ? `待同步 ${syncState.pendingChanges}`
+                      : syncState.syncStatus === 'conflict'
+                        ? '存在冲突'
+                        : '离线'}
               </div>
               <div className="relative w-full sm:w-[340px]">
                 <Search size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />

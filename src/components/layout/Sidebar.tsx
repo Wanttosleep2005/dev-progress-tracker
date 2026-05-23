@@ -36,6 +36,7 @@ import { PROJECT_COLORS, PROJECT_ICONS } from '../../types';
 import FocusTimerPanel from '../FocusTimer';
 import NotificationBell from '../NotificationBell';
 import { applyTemplate, PROJECT_TEMPLATES } from '../../lib/templates';
+import ProjectFolderIcon from '../ProjectFolderIcon';
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -147,12 +148,11 @@ export default function Sidebar() {
             onClick={() => setShowSelector(value => !value)}
             className="flex w-full items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-3 py-3 text-left transition hover:bg-white/[0.05]"
           >
-            <div
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-lg"
-              style={{ backgroundColor: currentProject ? `${currentProject.color}22` : 'rgba(255,255,255,0.05)' }}
-            >
-              {currentProject?.icon || <FolderKanban size={18} className="text-slate-500" />}
-            </div>
+            {currentProject ? <ProjectFolderIcon name={currentProject.name} color={currentProject.color} size="sm" /> : (
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/[0.05]">
+                <FolderKanban size={18} className="text-slate-500" />
+              </div>
+            )}
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-white">{currentProject?.name || '选择项目'}</p>
               <p className="mt-0.5 text-[11px] text-slate-500">当前工作空间</p>
@@ -176,7 +176,7 @@ export default function Sidebar() {
                       project.id === currentProjectId ? 'bg-sky-500/12 text-sky-300' : 'text-slate-300 hover:bg-white/[0.04]'
                     }`}
                   >
-                    <span>{project.icon}</span>
+                    <ProjectFolderIcon name={project.name} color={project.color} size="sm" />
                     <span className="truncate">{project.name}</span>
                     {project.id === currentProjectId && <span className="ml-auto h-2 w-2 rounded-full bg-sky-400" />}
                   </button>
@@ -348,19 +348,13 @@ export default function Sidebar() {
               </div>
 
               <div>
-                <label className="mb-1.5 block text-xs text-slate-400">项目图标</label>
-                <div className="flex flex-wrap gap-2">
-                  {PROJECT_ICONS.map(projectIcon => (
-                    <button
-                      key={projectIcon}
-                      onClick={() => setIcon(projectIcon)}
-                      className={`flex h-10 w-10 items-center justify-center rounded-xl text-lg transition ${
-                        icon === projectIcon ? 'bg-sky-500/20 ring-1 ring-sky-500/30' : 'bg-white/[0.02] hover:bg-white/[0.05]'
-                      }`}
-                    >
-                      {projectIcon}
-                    </button>
-                  ))}
+                <label className="mb-2 block text-xs text-slate-400">项目文件夹预览</label>
+                <div className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] p-3">
+                  <ProjectFolderIcon name={name || '新项目'} color={color} size="md" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-white">{name || '新项目'}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-500">统一使用文件夹图标，名称缩写显示在文件夹上。</p>
+                  </div>
                 </div>
               </div>
 

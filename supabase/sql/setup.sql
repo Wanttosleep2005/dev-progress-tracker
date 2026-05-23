@@ -15,6 +15,7 @@ drop function if exists public.devtrack_can_edit_project(text) cascade;
 drop function if exists public.devtrack_is_project_owner(text) cascade;
 drop function if exists public.devtrack_publish_project(text, text, jsonb, timestamptz, text, text) cascade;
 drop function if exists public.devtrack_touch_member_presence(text, text, text) cascade;
+drop function if exists public.devtrack_forget_current_user() cascade;
 
 -- Create projects table
 create table public.devtrack_projects (
@@ -244,6 +245,51 @@ begin
 end;
 $$;
 
+create function public.devtrack_forget_current_user()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id text := auth.uid()::text;
+  v_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
+  v_deleted_owned_projects integer := 0;
+  v_removed_memberships integer := 0;
+  v_anonymized_records integer := 0;
+begin
+  if v_user_id is null then
+    raise exception 'DevTrack account deletion requires an authenticated Supabase user';
+  end if;
+
+  delete from public.devtrack_projects
+  where owner_id = v_user_id;
+  get diagnostics v_deleted_owned_projects = row_count;
+
+  delete from public.devtrack_project_members
+  where user_id = v_user_id
+     or (
+       v_email <> ''
+       and (
+         user_id = ('email:' || v_email)
+         or lower(coalesce(email, '')) = v_email
+       )
+     );
+  get diagnostics v_removed_memberships = row_count;
+
+  update public.devtrack_sync_records
+  set user_id = 'deleted:' || left(v_user_id, 8)
+  where user_id = v_user_id;
+  get diagnostics v_anonymized_records = row_count;
+
+  return jsonb_build_object(
+    'deletedOwnedProjects', v_deleted_owned_projects,
+    'removedMemberships', v_removed_memberships,
+    'anonymizedRecords', v_anonymized_records
+  );
+end;
+$$;
+
 -- Enable RLS
 alter table public.devtrack_projects enable row level security;
 alter table public.devtrack_project_members enable row level security;
@@ -274,6 +320,7 @@ grant select, insert, update, delete on public.devtrack_project_members to authe
 grant select, insert, update, delete on public.devtrack_sync_records to authenticated;
 grant execute on function public.devtrack_publish_project(text, text, jsonb, timestamptz, text, text) to authenticated;
 grant execute on function public.devtrack_touch_member_presence(text, text, text) to authenticated;
+grant execute on function public.devtrack_forget_current_user() to authenticated;
 
 commit;
 

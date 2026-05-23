@@ -428,7 +428,7 @@ export const PROJECT_COLORS = [
   '#ec4899',
 ];
 
-export const PROJECT_ICONS = ['📌', '🎯', '🛠️', '📦', '🧪', '🎨', '📈', '🗂️', '✍️', '📣'];
+export const PROJECT_ICONS = ['folder'];
 
 export const RECURRENCE_LABELS: Record<RecurrenceRule, string> = {
   none: '不循环',

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { BriefcaseBusiness, Clock3, FolderKanban, Target, TrendingUp } from 'lucide-react';
 import { db } from '../db/database';
 import RiskPanel from '../components/RiskPanel';
+import ProjectFolderIcon from '../components/ProjectFolderIcon';
 import { useAppStore } from '../stores/useAppStore';
 import { useStatsStore } from '../stores/useStatsStore';
 import { analyzeProjectRisk, getProjectHealthScore, summarizeRiskLevel } from '../lib/riskAnalysis';
@@ -128,9 +129,10 @@ export default function Portfolio() {
             >
               <div className="mb-5 flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <h3 className="truncate text-lg font-semibold text-white">
-                    {project.icon} {project.name}
-                  </h3>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <ProjectFolderIcon name={project.name} color={project.color} size="sm" />
+                    <h3 className="truncate text-lg font-semibold text-white">{project.name}</h3>
+                  </div>
                   <p className="mt-1 line-clamp-2 text-sm text-slate-500">{project.description || '暂无项目描述'}</p>
                 </div>
                 <div className="shrink-0 text-right">

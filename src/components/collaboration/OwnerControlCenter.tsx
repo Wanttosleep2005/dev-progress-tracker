@@ -84,7 +84,7 @@ export default function OwnerControlCenter({ isOwner }: { isOwner: boolean }) {
     {
       label: '选择当前项目',
       done: Boolean(project),
-      detail: project ? `${project.icon} ${project.name}` : '先创建或选择一个项目',
+      detail: project ? project.name : '先创建或选择一个项目',
       action: () => navigate('/projects'),
     },
     {

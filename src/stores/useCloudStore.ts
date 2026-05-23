@@ -7,6 +7,7 @@ import {
   buildRemoteInviteUrl,
   deleteRemoteMember,
   fetchRemoteMembers,
+  forgetCloudIdentity,
   getCloudPendingChangeCount,
   importSharedProjects,
   isMemberOnline,
@@ -22,10 +23,12 @@ import {
   updateRemoteMemberRole,
   upsertRemoteMember,
   type CloudSession,
+  type CloudIdentityDeletionResult,
 } from '../lib/cloudSync';
 import { useAppStore } from './useAppStore';
 import { useToast } from './useToast';
 import { useNotificationCenterStore } from './useNotificationCenterStore';
+import { isLocalOnlyMode } from './usePreferences';
 
 interface CloudStore {
   session: CloudSession | null;
@@ -38,8 +41,9 @@ interface CloudStore {
   error: string;
   init: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, displayName: string) => Promise<void>;
+  signUp: (email: string, password: string, displayName: string, redirectTo?: string) => Promise<void>;
   signOut: () => void;
+  deleteAccount: () => Promise<CloudIdentityDeletionResult>;
   syncNow: () => Promise<void>;
   touchPresence: () => Promise<void>;
   loadTeam: (projectId: number) => Promise<void>;
@@ -72,6 +76,24 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
   error: '',
 
   init: async () => {
+    if (isLocalOnlyMode()) {
+      saveCloudSession(null);
+      const pendingChanges = await getCloudPendingChangeCount();
+      set({
+        session: null,
+        user: null,
+        members: [],
+        events: [],
+        inviteUrl: '',
+        syncState: {
+          lastSyncedAt: null,
+          pendingChanges,
+          syncStatus: 'offline',
+        },
+      });
+      return;
+    }
+
     const session = loadCloudSession();
     if (session) {
       try {
@@ -95,6 +117,9 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
   },
 
   signIn: async (email, password) => {
+    if (isLocalOnlyMode()) {
+      throw new Error('当前处于单人纯净流，请先在设置中切换到云协作模式。');
+    }
     set({ loading: true, error: '' });
     try {
       const session = await signInWithEmail(email, password);
@@ -102,19 +127,26 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
       await get().syncNow();
       await useAppStore.getState().loadProjects();
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : '登录失败', loading: false });
+      const message = error instanceof Error ? error.message : '登录失败';
+      set({ error: message, loading: false });
+      throw error;
     }
   },
 
-  signUp: async (email, password, displayName) => {
+  signUp: async (email, password, displayName, redirectTo) => {
+    if (isLocalOnlyMode()) {
+      throw new Error('当前处于单人纯净流，请先在设置中切换到云协作模式。');
+    }
     set({ loading: true, error: '' });
     try {
-      const session = await signUpWithEmail(email, password, displayName);
+      const session = await signUpWithEmail(email, password, displayName, redirectTo);
       set({ session, user: session.user, loading: false });
       await get().syncNow();
       await useAppStore.getState().loadProjects();
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : '注册失败', loading: false });
+      const message = error instanceof Error ? error.message : '注册失败';
+      set({ error: message, loading: false });
+      throw error;
     }
   },
 
@@ -123,7 +155,50 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
     set({ session: null, user: null, inviteUrl: '' });
   },
 
+  deleteAccount: async () => {
+    const session = get().session;
+    if (!session) {
+      throw new Error('请先登录后再注销云端账户。');
+    }
+    set({ loading: true, error: '' });
+    try {
+      const result = await forgetCloudIdentity(session);
+      set({
+        session: null,
+        user: null,
+        members: [],
+        events: [],
+        inviteUrl: '',
+        loading: false,
+        syncState: {
+          lastSyncedAt: null,
+          pendingChanges: 0,
+          syncStatus: navigator.onLine ? 'synced' : 'offline',
+        },
+      });
+      await useAppStore.getState().loadProjects();
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '注销云端账户失败';
+      set({ error: message, loading: false });
+      throw error;
+    }
+  },
+
   syncNow: async () => {
+    if (isLocalOnlyMode()) {
+      const pendingChanges = await getCloudPendingChangeCount();
+      set({
+        syncState: {
+          lastSyncedAt: null,
+          pendingChanges,
+          syncStatus: 'offline',
+        },
+        error: '',
+      });
+      return;
+    }
+
     const session = get().session;
     if (!session) {
       const pendingChanges = await getCloudPendingChangeCount();
@@ -151,6 +226,7 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
   },
 
   touchPresence: async () => {
+    if (isLocalOnlyMode()) return;
     const session = get().session;
     if (!session) return;
     await touchMemberPresence(session, useAppStore.getState().currentProjectId).catch(() => undefined);
@@ -159,6 +235,10 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
   },
 
   loadTeam: async (projectId) => {
+    if (isLocalOnlyMode()) {
+      set({ members: [], events: [] });
+      return;
+    }
     const project = await db.projects.get(projectId);
     const session = get().session;
     if (session && project?.remoteProjectId) {
@@ -217,6 +297,10 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
   },
 
   inviteByEmail: async (projectId, email, role) => {
+    if (isLocalOnlyMode()) {
+      useToast.getState().add('当前处于单人纯净流，邀请成员前请切换到云协作模式。', 'warning');
+      return;
+    }
     const session = get().session;
     if (session?.user.email === email) {
       useToast.getState().add('你不能邀请自己加入项目。', 'warning');
@@ -317,11 +401,19 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
   },
 
   createInviteLink: async (projectId, role) => {
+    if (isLocalOnlyMode()) {
+      set({ error: '当前处于单人纯净流，请先在设置中切换到云协作模式。' });
+      return;
+    }
     const project = await db.projects.get(projectId);
     set({ inviteUrl: project?.remoteProjectId ? buildRemoteInviteUrl(project.remoteProjectId, role) : buildInviteUrl(projectId, role) });
   },
 
   publishProject: async (projectId) => {
+    if (isLocalOnlyMode()) {
+      set({ error: '当前处于单人纯净流，请先在设置中切换到云协作模式。' });
+      return;
+    }
     const session = get().session;
     const project = await db.projects.get(projectId);
     if (!session || !project?.id) {
@@ -342,6 +434,10 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
   },
 
   joinProject: async (remoteProjectId, role) => {
+    if (isLocalOnlyMode()) {
+      set({ error: '当前处于单人纯净流，请先在设置中切换到云协作模式。' });
+      return;
+    }
     const session = get().session;
     if (!session) {
       set({ error: '请先登录，再加入共享项目。' });
@@ -369,6 +465,7 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
   },
 
   canEdit: (projectId) => {
+    if (isLocalOnlyMode()) return true;
     const project = useAppStore.getState().projects.find(item => item.id === projectId);
     if (!project?.remoteProjectId) return true;
     const role = get().getRole(projectId);
@@ -376,6 +473,7 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
   },
 
   canOwn: (projectId) => {
+    if (isLocalOnlyMode()) return true;
     const project = useAppStore.getState().projects.find(item => item.id === projectId);
     if (!project?.remoteProjectId) return true;
     return get().getRole(projectId) === 'owner';

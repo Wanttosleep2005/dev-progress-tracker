@@ -265,7 +265,7 @@ export default function Overview() {
       <motion.div variants={item} className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-white lg:text-3xl">
-            {project ? `${project.icon} ${project.name}` : '概览'}
+            {project ? project.name : '概览'}
           </h2>
           <p className="mt-1 text-sm text-slate-400">
             聚合任务、风险、节奏、里程碑和今日安排，形成更完整的项目仪表盘。

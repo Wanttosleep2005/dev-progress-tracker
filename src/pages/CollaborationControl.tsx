@@ -32,7 +32,7 @@ export default function CollaborationControl() {
           <p className="text-[10px] text-slate-500">当前项目</p>
           <p className="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
             <ShieldCheck size={14} className={isOwner ? 'text-emerald-300' : 'text-slate-500'} />
-            {project ? `${project.icon} ${project.name}` : '未选择项目'} · {isOwner ? 'Owner 视图' : '成员视图'}
+            {project ? project.name : '未选择项目'} · {isOwner ? 'Owner 视图' : '成员视图'}
           </p>
         </div>
       </div>

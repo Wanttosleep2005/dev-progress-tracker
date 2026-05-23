@@ -6,6 +6,7 @@ import { db, cloneProject } from '../db/database';
 import { useAppStore } from '../stores/useAppStore';
 import { PROJECT_COLORS, PROJECT_ICONS } from '../types';
 import { applyTemplate, PROJECT_TEMPLATES } from '../lib/templates';
+import ProjectFolderIcon from '../components/ProjectFolderIcon';
 
 export default function Projects() {
   const { projects, addProject, deleteProject, setCurrentProject, achievements, loadProjects } = useAppStore();
@@ -139,9 +140,7 @@ export default function Projects() {
             className="glass glass-hover group relative p-6 text-left"
           >
             <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-2xl" style={{ backgroundColor: `${project.color}15` }}>
-                {project.icon}
-              </div>
+              <ProjectFolderIcon name={project.name} color={project.color} size="md" />
               <div className="min-w-0 flex-1">
                 <h3 className="mb-1 font-semibold text-white transition-colors group-hover:text-sky-300">{project.name}</h3>
                 {project.description && <p className="line-clamp-2 text-xs text-slate-500">{project.description}</p>}
@@ -205,8 +204,14 @@ export default function Projects() {
                 <textarea value={description} onChange={event => setDescription(event.target.value)} placeholder="项目简介（可选）" rows={2} className="w-full resize-none rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none" />
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-400">图标</label>
-                <div className="flex flex-wrap gap-1.5">{PROJECT_ICONS.map(item => <button key={item} onClick={() => setIcon(item)} className={`flex h-9 w-9 items-center justify-center rounded-lg text-lg transition-all ${icon === item ? 'bg-sky-500/20 ring-1 ring-sky-500/30 scale-110' : 'hover:bg-white/[0.03]'}`}>{item}</button>)}</div>
+                <label className="mb-2 block text-xs font-medium text-slate-400">项目文件夹预览</label>
+                <div className="flex items-center gap-4 rounded-2xl border border-white/[0.06] bg-white/[0.025] p-3">
+                  <ProjectFolderIcon name={name || '新项目'} color={color} size="lg" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-white">{name || '新项目'}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-500">项目统一使用文件夹图标，文件夹上显示项目名缩写；可通过主题色区分不同项目。</p>
+                  </div>
+                </div>
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-slate-400">主题色</label>

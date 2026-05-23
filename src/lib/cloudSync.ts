@@ -10,6 +10,22 @@ export interface CloudSession {
   user: User;
 }
 
+export interface CloudIdentityDeletionResult {
+  remoteCleanup: {
+    deletedOwnedProjects?: number;
+    removedMemberships?: number;
+    anonymizedRecords?: number;
+  } | null;
+  authDeletion: 'deleted' | 'not_configured' | 'failed';
+  authDeletionMessage?: string;
+}
+
+export interface RemoteInvitePayload {
+  remoteProjectId: string;
+  role: TeamMember['role'];
+  createdAt?: number;
+}
+
 interface SupabaseAuthResponse {
   access_token: string;
   refresh_token?: string;
@@ -80,13 +96,14 @@ function getSupabaseConfig() {
   return {
     url: (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim().replace(/\/$/, ''),
     anonKey: (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim(),
+    deleteAccountFunctionUrl: (import.meta.env.VITE_SUPABASE_DELETE_ACCOUNT_FUNCTION_URL as string | undefined)?.trim(),
     syncTable: (import.meta.env.VITE_SUPABASE_SYNC_TABLE as string | undefined) || 'devtrack_sync_records',
     projectTable: (import.meta.env.VITE_SUPABASE_PROJECT_TABLE as string | undefined) || 'devtrack_projects',
     memberTable: (import.meta.env.VITE_SUPABASE_MEMBER_TABLE as string | undefined) || 'devtrack_project_members',
   };
 }
 
-function assertConfigured(): { url: string; anonKey: string; syncTable: string; projectTable: string; memberTable: string } {
+function assertConfigured(): { url: string; anonKey: string; deleteAccountFunctionUrl?: string; syncTable: string; projectTable: string; memberTable: string } {
   const config = getSupabaseConfig();
   if (!config.url || !config.anonKey || config.url.includes('your-project') || config.anonKey.includes('your-anon-key')) {
     throw new Error('请先配置真实的 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY，然后重新启动或重新部署项目。');
@@ -94,6 +111,7 @@ function assertConfigured(): { url: string; anonKey: string; syncTable: string; 
   return {
     url: config.url,
     anonKey: config.anonKey,
+    deleteAccountFunctionUrl: config.deleteAccountFunctionUrl,
     syncTable: config.syncTable,
     projectTable: config.projectTable,
     memberTable: config.memberTable,
@@ -297,6 +315,76 @@ export function saveCloudSession(session: CloudSession | null) {
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
 }
 
+async function cleanupLocalCloudIdentity(session: CloudSession) {
+  const now = new Date().toISOString();
+  await withoutSyncTracking(async () => {
+    await db.users.delete(session.user.id);
+    await db.projects.filter(project => Boolean(project.remoteProjectId)).modify({
+      remoteProjectId: null,
+      updatedAt: now,
+    });
+    await db.teamMembers.clear();
+    await db.inviteLinks.clear();
+    await db.syncChanges.clear();
+    await db.collaborationEvents
+      .where('userId')
+      .equals(session.user.id)
+      .modify({ userId: null, userName: '已注销用户' });
+  });
+  localStorage.removeItem('devtrack-last-synced-at');
+  localStorage.removeItem(DELETED_REMOTE_PROJECTS_KEY);
+}
+
+async function deleteAuthUserWithEdgeFunction(session: CloudSession): Promise<{ status: CloudIdentityDeletionResult['authDeletion']; message?: string; cleanup?: CloudIdentityDeletionResult['remoteCleanup'] }> {
+  const config = assertConfigured();
+  const endpoint = config.deleteAccountFunctionUrl || `${config.url}/functions/v1/devtrack-delete-account`;
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        apikey: config.anonKey,
+        Authorization: `Bearer ${session.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+
+    if (response.status === 404) {
+      return { status: 'not_configured', message: 'Supabase Edge Function 尚未部署' };
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      return { status: 'failed', message: body || response.statusText };
+    }
+    const body = await response.json().catch(() => null) as { cleanup?: CloudIdentityDeletionResult['remoteCleanup'] } | null;
+    return { status: 'deleted', cleanup: body?.cleanup ?? null };
+  } catch (error) {
+    return {
+      status: 'not_configured',
+      message: error instanceof Error ? error.message : '无法访问账号删除函数',
+    };
+  }
+}
+
+export async function forgetCloudIdentity(session: CloudSession): Promise<CloudIdentityDeletionResult> {
+  const authDeletion = await deleteAuthUserWithEdgeFunction(session);
+  let remoteCleanup = authDeletion.cleanup ?? null;
+  if (!remoteCleanup) {
+    remoteCleanup = await supabaseFetch('/rest/v1/rpc/devtrack_forget_current_user', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }, session.accessToken) as CloudIdentityDeletionResult['remoteCleanup'];
+  }
+  await cleanupLocalCloudIdentity(session);
+  saveCloudSession(null);
+
+  return {
+    remoteCleanup,
+    authDeletion: authDeletion.status,
+    authDeletionMessage: authDeletion.message,
+  };
+}
+
 export async function signInWithEmail(email: string, password: string): Promise<CloudSession> {
   const payload = await supabaseFetch('/auth/v1/token?grant_type=password', {
     method: 'POST',
@@ -313,8 +401,9 @@ export async function signInWithEmail(email: string, password: string): Promise<
   return session;
 }
 
-export async function signUpWithEmail(email: string, password: string, displayName: string): Promise<CloudSession> {
-  const payload = await supabaseFetch('/auth/v1/signup', {
+export async function signUpWithEmail(email: string, password: string, displayName: string, redirectTo?: string): Promise<CloudSession> {
+  const query = redirectTo ? `?redirect_to=${encodeURIComponent(redirectTo)}` : '';
+  const payload = await supabaseFetch(`/auth/v1/signup${query}`, {
     method: 'POST',
     body: JSON.stringify({ email, password, data: { display_name: displayName } }),
   }) as SupabaseAuthResponse;
@@ -806,6 +895,36 @@ export async function deleteRemoteMember(session: CloudSession, remoteProjectId:
 export function buildRemoteInviteUrl(remoteProjectId: string, role: TeamMember['role']) {
   const token = btoa(JSON.stringify({ remoteProjectId, role, createdAt: Date.now() }));
   return `${getAppBaseUrl()}/invite/${token}`;
+}
+
+export function parseRemoteInvite(input: string): RemoteInvitePayload | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const token = (() => {
+    try {
+      const url = new URL(trimmed);
+      const parts = url.pathname.split('/').filter(Boolean);
+      const inviteIndex = parts.findIndex(part => part === 'invite');
+      return inviteIndex >= 0 ? parts[inviteIndex + 1] : '';
+    } catch {
+      const parts = trimmed.split('/').filter(Boolean);
+      const inviteIndex = parts.findIndex(part => part === 'invite');
+      return inviteIndex >= 0 ? parts[inviteIndex + 1] : trimmed;
+    }
+  })();
+
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob(token)) as Partial<RemoteInvitePayload>;
+    if (!payload.remoteProjectId || !payload.role || !['owner', 'editor', 'viewer'].includes(payload.role)) return null;
+    return {
+      remoteProjectId: payload.remoteProjectId,
+      role: payload.role,
+      createdAt: payload.createdAt,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function joinRemoteProject(session: CloudSession, remoteProjectId: string, role: TeamMember['role']) {

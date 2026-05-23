@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Bell, Database, Download, Eye, FileText, FolderOpen, Info, Keyboard, Network, Settings, Sparkles, Trash2, Upload } from 'lucide-react';
+import { Bell, Database, Download, Eye, FileText, FolderOpen, Info, Keyboard, Network, Settings, Sparkles, Trash2, Upload, UserX } from 'lucide-react';
 import { db } from '../db/database';
 import { buildWeeklyReport } from '../lib/reporting';
 import { useAppStore } from '../stores/useAppStore';
@@ -11,6 +11,7 @@ import { useTheme } from '../stores/useTheme';
 import { usePreferences } from '../stores/usePreferences';
 import { useSidebarStore } from '../stores/useSidebarStore';
 import { useNotificationStore } from '../stores/useNotificationStore';
+import { useCloudStore } from '../stores/useCloudStore';
 import { getCustomBaseUrl, setCustomBaseUrl } from '../lib/cloudSync';
 import { getBackupDirectory, getBackupDirectoryLabel, selectBackupDirectory, setBackupDirectory } from '../lib/backup';
 import TimePicker from '../components/ui/TimePicker';
@@ -55,11 +56,16 @@ export default function SettingsPage() {
   const milestones = useMilestoneStore(state => state.milestones);
   const diaryEntries = useDiaryStore(state => state.entries);
   const { theme, setTheme } = useTheme();
-  const { animationsEnabled, setAnimationsEnabled } = usePreferences();
+  const { animationsEnabled, setAnimationsEnabled, collaborationMode, setCollaborationMode } = usePreferences();
   const { settings: notificationSettings, requestPermission, updateSettings } = useNotificationStore();
   const { items: sidebarItems, init: initSidebar, toggle: toggleSidebarItem, hideAll, showAll, applyRecommended } = useSidebarStore();
+  const cloudSession = useCloudStore(state => state.session);
+  const deleteCloudAccount = useCloudStore(state => state.deleteAccount);
+  const signOutCloud = useCloudStore(state => state.signOut);
+  const cloudLoading = useCloudStore(state => state.loading);
   const [message, setMessage] = useState('');
   const [version, setVersion] = useState('0.0.0');
+  const [deletingCloudAccount, setDeletingCloudAccount] = useState(false);
   const [shortcuts, setShortcuts] = useState(() => {
     try {
       const saved = localStorage.getItem('devtrack-shortcuts');
@@ -166,6 +172,53 @@ export default function SettingsPage() {
     await db.achievements.clear();
     setMessage('全部数据已清空');
     setTimeout(() => window.location.reload(), 1000);
+  };
+
+  const handleDeleteCloudAccount = async () => {
+    const email = cloudSession?.user.email;
+    if (!email) {
+      setMessage('请先登录云端账号后再注销。');
+      return;
+    }
+    const firstConfirm = window.confirm(
+      '确定要注销当前云端账户身份吗？\n\n这会删除你拥有的云端共享项目，移除你在其他共享项目中的成员身份，匿名化历史同步记录，并解除本地项目的云端绑定。本地任务不会被清空。'
+    );
+    if (!firstConfirm) return;
+    const typed = window.prompt(`为避免误操作，请输入当前邮箱确认：${email}`);
+    if (typed !== email) {
+      setMessage('邮箱确认不一致，已取消注销。');
+      return;
+    }
+
+    setDeletingCloudAccount(true);
+    try {
+      const result = await deleteCloudAccount();
+      const authText = result.authDeletion === 'deleted'
+        ? 'Supabase Auth 用户也已删除，这个邮箱可以重新注册。'
+        : result.authDeletion === 'not_configured'
+          ? '业务数据已清理；账号删除函数未部署，仍需在 Supabase Auth Users 中手动删除该邮箱，邮箱才会变成全新的 Supabase 账号。'
+          : `业务数据已清理；Auth 用户删除失败：${result.authDeletionMessage || '未知错误'}`;
+      setMessage(`云端身份已注销。${authText}`);
+      setTimeout(() => window.location.reload(), 1200);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '注销云端账户失败');
+    } finally {
+      setDeletingCloudAccount(false);
+    }
+  };
+
+  const handleCollaborationModeChange = (mode: 'local' | 'cloud') => {
+    if (mode === collaborationMode) return;
+    if (mode === 'local') {
+      const confirmed = window.confirm('切换到单人纯净流后，会停止 Supabase 登录、同步、邀请和在线状态心跳。本地任务和项目不会删除。确定切换吗？');
+      if (!confirmed) return;
+      signOutCloud();
+      setCollaborationMode('local');
+      setMessage('已切换到单人纯净流：云同步已停用，本地数据会继续保存在当前浏览器 IndexedDB 中。');
+      return;
+    }
+    setCollaborationMode('cloud');
+    setMessage('已切换到云协作模式：可以登录 Supabase、发布共享项目并同步团队进度。');
   };
 
   const handleCSVImport = () => {
@@ -293,6 +346,49 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="glass rounded-3xl p-5">
+        <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <Database size={16} className="text-emerald-300" />
+          运行模式
+        </h3>
+        <p className="mb-4 text-xs leading-5 text-slate-500">
+          单人纯净流完全停用 Supabase 登录、同步、邀请和在线状态心跳；本地数据保存在当前浏览器 IndexedDB 中。后续需要团队协作时，可以随时切回云协作模式。
+        </p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <button
+            onClick={() => handleCollaborationModeChange('local')}
+            className={`rounded-2xl border p-4 text-left transition ${
+              collaborationMode === 'local'
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                : 'border-white/[0.06] bg-white/[0.02] text-slate-300 hover:bg-white/[0.04]'
+            }`}
+          >
+            <p className="text-sm font-semibold">单人纯净流</p>
+            <p className="mt-2 text-xs leading-5 opacity-75">只使用本地 IndexedDB，不连接 Supabase，不产生云端同步请求。</p>
+            <span className="mt-3 inline-flex rounded-full bg-white/[0.06] px-2 py-1 text-[10px] text-slate-300">
+              推荐给单机使用
+            </span>
+          </button>
+          <button
+            onClick={() => handleCollaborationModeChange('cloud')}
+            className={`rounded-2xl border p-4 text-left transition ${
+              collaborationMode === 'cloud'
+                ? 'border-sky-500/30 bg-sky-500/10 text-sky-200'
+                : 'border-white/[0.06] bg-white/[0.02] text-slate-300 hover:bg-white/[0.04]'
+            }`}
+          >
+            <p className="text-sm font-semibold">云协作模式</p>
+            <p className="mt-2 text-xs leading-5 opacity-75">启用 Supabase 登录、项目共享、成员权限、活动流和多端同步。</p>
+            <span className="mt-3 inline-flex rounded-full bg-white/[0.06] px-2 py-1 text-[10px] text-slate-300">
+              适合团队项目
+            </span>
+          </button>
+        </div>
+        <p className="mt-3 text-[10px] leading-5 text-slate-600">
+          本地数据不会因为未登录 Supabase 而自动删除；风险主要来自手动清理浏览器数据、无痕模式、浏览器存储回收、换浏览器或换域名。重要阶段建议使用备份与恢复中心创建还原点。
+        </p>
       </div>
 
       <div className="glass rounded-3xl p-5">
@@ -658,6 +754,33 @@ export default function SettingsPage() {
           危险区域
         </h3>
         <p className="mb-4 text-xs text-slate-500">清空后无法恢复，建议先做一次导出备份。</p>
+        <div className="mb-4 rounded-2xl border border-red-500/10 bg-red-500/[0.04] p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="flex items-center gap-2 text-sm font-semibold text-red-200">
+                <UserX size={15} />
+                注销云端账户身份
+              </p>
+              <p className="mt-2 text-xs leading-5 text-slate-400">
+                清理 DevTrack 云端业务表中的当前用户 ID、成员关系和同步痕迹，并退出登录。本地项目会解除云端共享绑定，但不会删除本地任务。
+              </p>
+              <p className="mt-1 text-[10px] leading-5 text-amber-200/80">
+                要让邮箱成为完全全新的 Supabase Auth 账号，必须部署账号删除 Edge Function，或在 Supabase 后台 Auth Users 手动删除该邮箱。
+              </p>
+              {cloudSession?.user.email && (
+                <p className="mt-2 text-[10px] text-slate-500">当前云端账号：{cloudSession.user.email}</p>
+              )}
+            </div>
+            <button
+              onClick={handleDeleteCloudAccount}
+              disabled={!cloudSession || deletingCloudAccount || cloudLoading}
+              className="flex shrink-0 items-center justify-center gap-2 rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-2 text-sm text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <UserX size={14} />
+              {deletingCloudAccount ? '注销中...' : '注销云端账户'}
+            </button>
+          </div>
+        </div>
         <button
           onClick={handleClear}
           className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-300 hover:bg-red-500/20"

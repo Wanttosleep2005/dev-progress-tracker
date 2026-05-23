@@ -28,6 +28,7 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+supabase/.temp/
 
 # Changelog (local only)
 CHANGELOG.md

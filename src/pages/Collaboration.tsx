@@ -4,7 +4,7 @@ import { CheckCircle2, Cloud, Copy, Crown, Link2, Mail, RefreshCw, Rocket, Shiel
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../stores/useAppStore';
 import { useCloudStore } from '../stores/useCloudStore';
-import { getCustomBaseUrl } from '../lib/cloudSync';
+import { getCustomBaseUrl, parseRemoteInvite } from '../lib/cloudSync';
 import { getBackupDirectoryLabel } from '../lib/backup';
 import type { SyncStatus, TeamRole } from '../types';
 
@@ -77,6 +77,7 @@ export default function Collaboration() {
     transferOwnership,
     createInviteLink,
     publishProject,
+    joinProject,
     getRole,
     canOwn,
   } = useCloudStore();
@@ -90,6 +91,8 @@ export default function Collaboration() {
   const [permissionPage, setPermissionPage] = useState(1);
   const [eventPage, setEventPage] = useState(1);
   const [publishMessage, setPublishMessage] = useState('');
+  const [joinInviteInput, setJoinInviteInput] = useState('');
+  const [joinInviteMessage, setJoinInviteMessage] = useState('');
 
   useEffect(() => {
     if (currentProjectId) loadTeam(currentProjectId);
@@ -127,6 +130,23 @@ export default function Collaboration() {
       await publishProject(currentProjectId);
     }
     await createInviteLink(currentProjectId, role);
+  };
+
+  const handleJoinByInviteLink = async () => {
+    setJoinInviteMessage('');
+    const parsed = parseRemoteInvite(joinInviteInput);
+    if (!parsed) {
+      setJoinInviteMessage('邀请链接无法识别，请确认复制的是完整的 /invite/... 链接。');
+      return;
+    }
+    if (!session) {
+      setJoinInviteMessage('请先在左侧登录或注册 Supabase 账号，再用邀请链接加入项目。');
+      return;
+    }
+    await joinProject(parsed.remoteProjectId, parsed.role);
+    await syncNow();
+    setJoinInviteInput('');
+    setJoinInviteMessage('已根据邀请链接加入项目，正在同步项目数据。');
   };
 
   useEffect(() => {
@@ -332,8 +352,8 @@ export default function Collaboration() {
               <input value={email} onChange={event => setEmail(event.target.value)} placeholder="邮箱，例如 QQ 邮箱也可以" className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none" />
               <input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="密码" className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none" />
               <div className="flex gap-3">
-                <button disabled={loading} onClick={() => signIn(email, password)} className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-600 disabled:opacity-50">登录</button>
-                <button disabled={loading} onClick={() => signUp(email, password, displayName)} className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50">注册</button>
+                <button disabled={loading} onClick={() => signIn(email, password).catch(() => undefined)} className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-600 disabled:opacity-50">登录</button>
+                <button disabled={loading} onClick={() => signUp(email, password, displayName, `${window.location.origin}/collaboration`).catch(() => undefined)} className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50">注册</button>
               </div>
               <p className="text-xs leading-relaxed text-slate-500">需要配置 Supabase 环境变量并执行 docs/supabase-sync.sql。邮箱只是账户标识，不需要和 QQ 邮箱做额外联动。</p>
             </div>
@@ -345,6 +365,26 @@ export default function Collaboration() {
             <Users size={16} className="text-emerald-300" />
             项目共享
           </h3>
+          <div className="mb-4 rounded-2xl border border-cyan-500/15 bg-cyan-500/5 p-4">
+            <p className="mb-2 text-xs font-semibold text-cyan-100">通过邀请链接加入项目</p>
+            <p className="mb-3 text-xs leading-5 text-slate-500">如果成员已经在系统里注册或登录，可以把收到的邀请地址粘贴到这里，直接加入对应团队项目。</p>
+            <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+              <input
+                value={joinInviteInput}
+                onChange={event => setJoinInviteInput(event.target.value)}
+                placeholder="粘贴 /invite/... 邀请链接"
+                className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none"
+              />
+              <button
+                onClick={handleJoinByInviteLink}
+                disabled={loading}
+                className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-600 disabled:opacity-50"
+              >
+                加入项目
+              </button>
+            </div>
+            {joinInviteMessage && <p className="mt-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-xs text-slate-300">{joinInviteMessage}</p>}
+          </div>
           {!project ? (
             <p className="text-sm text-slate-500">请先选择一个项目。</p>
           ) : (
@@ -353,7 +393,7 @@ export default function Collaboration() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-xs text-slate-500">当前项目</p>
-                    <p className="mt-1 font-semibold text-white">{project.icon} {project.name}</p>
+                    <p className="mt-1 font-semibold text-white">{project.name}</p>
                     <p className="mt-1 text-xs text-slate-500">{isShared ? `远程项目 ID：${project.remoteProjectId}` : '尚未发布为共享项目'}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">

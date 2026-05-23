@@ -52,7 +52,7 @@ export default function AICommandCenter() {
           <p className="mt-1 text-sm text-slate-400">描述你想做的事，AI 会匹配项目逻辑并生成可执行内容。</p>
         </div>
         <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-200">
-          当前项目：{currentProject ? `${currentProject.icon} ${currentProject.name}` : '未选择'}
+          当前项目：{currentProject ? currentProject.name : '未选择'}
         </div>
       </div>
 
