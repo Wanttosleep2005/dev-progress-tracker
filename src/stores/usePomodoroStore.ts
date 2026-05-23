@@ -3,6 +3,7 @@ import type { PomodoroConfig, PomodoroPhase, PomodoroSession } from '../types';
 import { useAppStore } from './useAppStore';
 import { useNotificationStore } from './useNotificationStore';
 import { useStatsStore } from './useStatsStore';
+import { useTaskStore } from './useTaskStore';
 
 const CONFIG_KEY = 'devtrack-pomodoro-config';
 const SESSIONS_KEY = 'devtrack-pomodoro-sessions';
@@ -122,6 +123,19 @@ export const usePomodoroStore = create<PomodoroStore>((set, get) => ({
       set({ sessions: next });
       if (phase === 'work' && (completed || elapsedSeconds > 0)) {
         useStatsStore.getState().addSession(completed ? totalSeconds : elapsedSeconds, taskTitle, useAppStore.getState().currentProjectId ?? undefined, taskId);
+        if (completed && taskId) {
+          const tasks = useTaskStore.getState().tasks;
+          const task = tasks.find(t => t.id === taskId);
+          if (task) {
+            const completedPomodoros = next.filter(s => s.taskId === taskId && s.phase === 'work' && s.completed).length;
+            const newTrackedMinutes = (task.trackedMinutes || 0) + config.workMinutes;
+            const newStatus =
+              task.status === 'todo' ? 'in_progress' :
+              task.pomodoroGoal && completedPomodoros >= task.pomodoroGoal && task.status === 'in_progress' ? 'review' :
+              undefined;
+            useTaskStore.getState().update(taskId, { trackedMinutes: newTrackedMinutes, ...(newStatus ? { status: newStatus } : {}) });
+          }
+        }
       }
     }
     set({ state: 'idle', remainingSeconds: phaseMinutes('work', config) * 60, phase: 'work', taskId: null, taskTitle: '' });

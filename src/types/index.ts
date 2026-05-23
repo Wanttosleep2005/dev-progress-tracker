@@ -20,7 +20,7 @@ export type CollaborationEventType =
   | 'diary_created'
   | 'comment_added';
 export type PomodoroPhase = 'work' | 'short_break' | 'long_break';
-export type AIActionType = 'create_task' | 'create_today_task' | 'create_milestone' | 'create_diary' | 'create_event' | 'configure_pomodoro';
+export type AIActionType = 'create_task' | 'create_today_task' | 'create_milestone' | 'create_diary' | 'create_event' | 'update_task' | 'update_milestone' | 'configure_pomodoro';
 export type AIProvider = 'deepseek_chat' | 'custom_chat';
 
 export interface Project {
@@ -230,14 +230,6 @@ export interface InviteLink {
   expiresAt: string | null;
 }
 
-export interface RemoteProject {
-  id: string;
-  name: string;
-  ownerId: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface PomodoroConfig {
   workMinutes: number;
   shortBreakMinutes: number;
@@ -312,6 +304,12 @@ export interface AICommandAction {
   trackedMinutes?: number;
   /** v0.6.0: 关联冲刺ID */
   sprintId?: string;
+  /** 要更新的任务ID（用于 update_task） */
+  taskId?: number | string;
+  /** 番茄钟目标轮数 */
+  pomodoroGoal?: number | null;
+  /** 任务依赖ID列表 */
+  dependencyIds?: number[];
 }
 
 export interface AICommandPlan {

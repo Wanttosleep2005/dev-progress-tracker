@@ -12,7 +12,7 @@ export const defaultAICommandSettings: AICommandSettings = {
   autoSyncAfterExecute: true,
 };
 
-export const commandPlanSchema = {
+const commandPlanSchema = {
   type: 'object',
   additionalProperties: false,
   required: ['summary', 'confidence', 'actions'],
@@ -42,7 +42,7 @@ export const commandPlanSchema = {
         properties: {
           type: {
             type: 'string',
-            enum: ['create_task', 'create_today_task', 'create_milestone', 'create_diary', 'create_event', 'configure_pomodoro'],
+            enum: ['create_task', 'create_today_task', 'create_milestone', 'create_diary', 'create_event', 'update_task', 'update_milestone', 'configure_pomodoro'],
           },
           title: { type: 'string' },
           description: { type: 'string' },
@@ -56,6 +56,14 @@ export const commandPlanSchema = {
           eventType: { type: 'string', enum: ['release', 'bugfix', 'milestone', 'decision', 'other'] },
           milestoneType: { type: 'string', enum: ['progress', 'completion'] },
           targetStatus: { type: 'string', enum: ['todo', 'in_progress', 'review', 'done'] },
+          taskId: { type: ['integer', 'string'] },
+          milestoneStatus: { type: 'string', enum: ['upcoming', 'active', 'completed'] },
+          pomodoroGoal: { type: ['integer', 'null'] },
+          dependencyIds: { type: 'array', items: { type: 'integer' } },
+          url: { type: 'string' },
+          plannedStartAt: { type: 'string' },
+          plannedEndAt: { type: 'string' },
+          relatedTaskId: { type: 'string' },
         },
       },
     },

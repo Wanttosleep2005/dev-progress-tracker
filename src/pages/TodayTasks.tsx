@@ -39,6 +39,7 @@ export default function TodayTasks() {
   const [estimatedMinutes, setEstimatedMinutes] = useState('60');
   const [tags, setTags] = useState('');
   const [recurrence, setRecurrence] = useState<RecurrenceRule>('none');
+  const [pomodoroGoal, setPomodoroGoal] = useState('');
 
   const todayTasks = useMemo(
     () =>
@@ -75,6 +76,7 @@ export default function TodayTasks() {
       tags: tags.split(',').map(tag => tag.trim()).filter(Boolean),
       dueDate: dueAt || null,
       milestoneId: null,
+      pomodoroGoal: pomodoroGoal ? parseInt(pomodoroGoal) || null : null,
       estimatedMinutes: estimatedMinutes ? parseInt(estimatedMinutes) || null : null,
       url: '',
       recurrence,
@@ -91,6 +93,7 @@ export default function TodayTasks() {
     setEstimatedMinutes('60');
     setTags('');
     setRecurrence('none');
+    setPomodoroGoal('');
     setPriority('high');
   };
 
@@ -178,6 +181,18 @@ export default function TodayTasks() {
               value={estimatedMinutes}
               onChange={event => setEstimatedMinutes(event.target.value)}
               placeholder="预估工时（分钟）"
+              className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[10px] text-slate-500">番茄目标（轮）</label>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={pomodoroGoal}
+              onChange={event => setPomodoroGoal(event.target.value)}
+              placeholder="番茄目标（轮）"
               className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none"
             />
           </div>

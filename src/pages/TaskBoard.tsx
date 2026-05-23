@@ -69,6 +69,7 @@ export default function TaskBoard() {
   const [newEstimatedMinutes, setNewEstimatedMinutes] = useState('45');
   const [newUrl, setNewUrl] = useState('');
   const [newRecurrence, setNewRecurrence] = useState<RecurrenceRule>('none');
+  const [newPomodoroGoal, setNewPomodoroGoal] = useState('');
 
   const milestoneTaskCount = useMemo(() => {
     return milestones.reduce<Record<number, number>>((acc, milestone) => {
@@ -87,6 +88,7 @@ export default function TaskBoard() {
     setNewEstimatedMinutes('45');
     setNewUrl('');
     setNewRecurrence('none');
+    setNewPomodoroGoal('');
   };
 
   const handleAdd = useCallback(async () => {
@@ -102,6 +104,7 @@ export default function TaskBoard() {
       milestoneId: newMilestoneId,
       estimatedMinutes: newEstimatedMinutes ? parseInt(newEstimatedMinutes) || null : null,
       url: newUrl.trim(),
+      pomodoroGoal: newPomodoroGoal ? parseInt(newPomodoroGoal) || null : null,
       recurrence: newRecurrence,
       source: 'board',
       remindAt: null,
@@ -111,7 +114,7 @@ export default function TaskBoard() {
       dependsOn: [],
     });
     resetCreateForm();
-  }, [add, currentProjectId, newDesc, newDueDate, newEstimatedMinutes, newMilestoneId, newPriority, newTags, newTitle, newUrl]);
+  }, [add, currentProjectId, newDesc, newDueDate, newEstimatedMinutes, newMilestoneId, newPomodoroGoal, newPriority, newTags, newTitle, newUrl]);
 
   const handleDragStart = (event: ReactDragEvent<HTMLDivElement>, taskId: number) => {
     event.dataTransfer.effectAllowed = 'move';
@@ -496,6 +499,7 @@ export default function TaskBoard() {
               <input value={newUrl} onChange={event => setNewUrl(event.target.value)} placeholder="外部链接" className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none" />
               <input type="date" value={newDueDate} onChange={event => setNewDueDate(event.target.value)} className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white focus:border-sky-500/50 focus:outline-none" />
               <input type="number" min="0" step="5" value={newEstimatedMinutes} onChange={event => setNewEstimatedMinutes(event.target.value)} placeholder="预估工时（分钟）" className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none" />
+              <input type="number" min="0" step="1" value={newPomodoroGoal} onChange={event => setNewPomodoroGoal(event.target.value)} placeholder="番茄目标（轮）" className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none" />
               <select value={newRecurrence} onChange={event => setNewRecurrence(event.target.value as RecurrenceRule)} className="custom-select rounded-xl border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-sm text-white focus:border-sky-500/50 focus:outline-none">
                 {Object.entries(RECURRENCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
@@ -651,6 +655,10 @@ export default function TaskBoard() {
                     {Object.entries(RECURRENCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </div>
+                <div>
+                  <label className="mb-1.5 block text-xs text-slate-400">番茄目标（轮数）</label>
+                  <input type="number" min="0" step="1" value={editingTask.pomodoroGoal ?? ''} onChange={event => setEditingTask({ ...editingTask, pomodoroGoal: event.target.value ? parseInt(event.target.value) : null })} className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white focus:border-sky-500/50 focus:outline-none" />
+                </div>
                 <div className="lg:col-span-2 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
@@ -759,6 +767,7 @@ export default function TaskBoard() {
                           recurrence: editingTask.recurrence ?? 'none',
                           dependsOn: getTaskDependencyIds(editingTask),
                           dependencyIds: getTaskDependencyIds(editingTask),
+                          pomodoroGoal: editingTask.pomodoroGoal,
                           subtasks: editingTask.subtasks,
                           trackedMinutes: editingTask.trackedMinutes,
                         });

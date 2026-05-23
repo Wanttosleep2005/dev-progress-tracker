@@ -2,7 +2,7 @@ export function minutesToSeconds(minutes: number): number {
   return Math.round(minutes * 60);
 }
 
-export function secondsToMinutes(seconds: number): number {
+function secondsToMinutes(seconds: number): number {
   return seconds / 60;
 }
 

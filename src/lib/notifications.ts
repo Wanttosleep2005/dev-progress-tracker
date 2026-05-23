@@ -31,7 +31,7 @@ function toMinutes(value: string) {
   return (hours || 0) * 60 + (minutes || 0);
 }
 
-export function isQuietTime(settings: NotificationSettings, now = new Date()) {
+function isQuietTime(settings: NotificationSettings, now = new Date()) {
   if (!settings.quietHoursEnabled) return false;
   const current = now.getHours() * 60 + now.getMinutes();
   const start = toMinutes(settings.quietStart);
@@ -40,7 +40,7 @@ export function isQuietTime(settings: NotificationSettings, now = new Date()) {
   return current >= start || current <= end;
 }
 
-export function playNotificationTone(enabled: boolean) {
+function playNotificationTone(enabled: boolean) {
   if (!enabled) return;
   try {
     const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;

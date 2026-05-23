@@ -99,8 +99,14 @@ export default function Pomodoro() {
     return Array.from(map.values()).sort((a, b) => b.count - a.count).slice(0, 6);
   }, [sessions]);
 
+  const selectedTask = tasks.find(task => task.id === selectedTaskId);
+  const selectedTaskPomodoros = selectedTaskId
+    ? sessions.filter(s => s.taskId === selectedTaskId && s.phase === 'work' && s.completed).length
+    : 0;
+  const pomodoroGoal = selectedTask?.pomodoroGoal ?? null;
+  const pomodoroGoalProgress = pomodoroGoal ? Math.round((selectedTaskPomodoros / pomodoroGoal) * 100) : 0;
+
   const startTimer = () => {
-    const selectedTask = tasks.find(task => task.id === selectedTaskId);
     start(selectedTask?.title || draftTitle, selectedTask?.id ?? null);
   };
 
@@ -128,6 +134,26 @@ export default function Pomodoro() {
             detail={config.showMinutesOnly ? `${Math.ceil(remainingSeconds / 60)}m` : formatDurationFromSeconds(remainingSeconds, { compact: true, allowZero: true })}
           />
           <p className="mt-2 text-sm text-slate-400">{taskTitle || '选择任务或输入自定义专注主题'}</p>
+
+          {pomodoroGoal && selectedTaskId && (
+            <div className="mt-3 w-full max-w-md">
+              <div className="mb-1 flex items-center justify-between text-xs">
+                <span className="text-slate-400">🍅 番茄进度</span>
+                <span className="font-medium text-cyan-300">{selectedTaskPomodoros} / {pomodoroGoal} 轮</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-white/[0.04]">
+                <motion.div
+                  className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.min(100, pomodoroGoalProgress)}%` }}
+                  transition={{ duration: 0.5 }}
+                />
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {pomodoroGoalProgress >= 100 ? '🎉 目标达成！' : `还差 ${pomodoroGoal - selectedTaskPomodoros} 轮完成目标`}
+              </p>
+            </div>
+          )}
 
           <div className="mt-6 grid w-full gap-3 md:grid-cols-[1fr_1fr_auto]">
             <input
