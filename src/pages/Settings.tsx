@@ -15,6 +15,38 @@ import { getCustomBaseUrl, setCustomBaseUrl } from '../lib/cloudSync';
 import TimePicker from '../components/ui/TimePicker';
 import type { TaskPriority, TaskStatus } from '../types';
 
+interface NetworkInterfaceCandidate {
+  name?: string;
+  address: string;
+  radmin?: boolean;
+}
+
+function isUsableIpv4(ip: string) {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) && ip !== '127.0.0.1' && !ip.startsWith('0.');
+}
+
+function isRadminIpv4(ip: string) {
+  return ip.startsWith('26.');
+}
+
+function rankDetectedIps(ips: string[]) {
+  return [...new Set(ips.filter(isUsableIpv4))].sort((a, b) => {
+    if (isRadminIpv4(a) !== isRadminIpv4(b)) return isRadminIpv4(a) ? -1 : 1;
+    return a.localeCompare(b, undefined, { numeric: true });
+  });
+}
+
+async function detectServerNetworkIps(): Promise<NetworkInterfaceCandidate[]> {
+  try {
+    const response = await fetch('/__devtrack/network-interfaces', { cache: 'no-store' });
+    if (!response.ok) return [];
+    const data = await response.json() as { interfaces?: NetworkInterfaceCandidate[] };
+    return (data.interfaces || []).filter(item => isUsableIpv4(item.address));
+  } catch {
+    return [];
+  }
+}
+
 export default function SettingsPage() {
   const { currentProjectId, projects } = useAppStore();
   const tasks = useTaskStore(state => state.tasks);
@@ -398,7 +430,21 @@ export default function SettingsPage() {
             onClick={async () => {
               setMessage('');
               setDetectedIps([]);
+              const serverCandidates = await detectServerNetworkIps();
+              const serverIps = rankDetectedIps(serverCandidates.map(item => item.address));
+              if (serverIps.length > 0) {
+                const radminIp = serverIps.find(isRadminIpv4);
+                setDetectedIps(serverIps);
+                if (radminIp) {
+                  const url = `http://${radminIp}:5173`;
+                  setBaseUrl(url);
+                  setCustomBaseUrl(url);
+                  setMessage(`已检测到 Radmin IPv4：${radminIp}，已自动设为邀请链接基地址`);
+                  return;
+                }
+              }
               const ips = new Set<string>();
+              serverIps.forEach(ip => ips.add(ip));
               const pc = new RTCPeerConnection({
                 iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
               });

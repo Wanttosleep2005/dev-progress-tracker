@@ -1,9 +1,39 @@
-import { defineConfig } from 'vite';
+import os from 'node:os';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
+function devtrackNetworkInterfacesPlugin(): Plugin {
+  return {
+    name: 'devtrack-network-interfaces',
+    configureServer(server) {
+      server.middlewares.use('/__devtrack/network-interfaces', (req, res, next) => {
+        if (req.method !== 'GET') {
+          next();
+          return;
+        }
+
+        const interfaces = Object.entries(os.networkInterfaces()).flatMap(([name, addresses]) =>
+          (addresses || [])
+            .filter(item => item.family === 'IPv4' && !item.internal)
+            .map(item => ({
+              name,
+              address: item.address,
+              radmin: item.address.startsWith('26.') || /radmin/i.test(name),
+            }))
+        );
+
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(JSON.stringify({ interfaces }));
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [devtrackNetworkInterfacesPlugin(), react(), tailwindcss()],
   resolve: {
     alias: {
       '@': '/src',

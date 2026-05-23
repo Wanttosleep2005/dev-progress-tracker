@@ -5,7 +5,7 @@
 [![React](https://img.shields.io/badge/React-19-blue?logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6-blue?logo=typescript)](https://www.typescriptlang.org)
 [![Vite](https://img.shields.io/badge/Vite-8-purple?logo=vite)](https://vite.dev)
-[![Version](https://img.shields.io/badge/version-0.6.5-green)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.7.0-green)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ## 功能特性
@@ -49,13 +49,15 @@
 - **27 个成就** - 覆盖任务、专注、日记、里程碑、协作等多维度
 - **三级等级** - 铜牌 🥉 / 银牌 🥈 / 金牌 🥇，解锁动画弹窗
 
-### 团队协作 (Beta)
+### 团队协作 (LAN + Cloud)
+- **局域网协作**：通过 Radmin VPN 实现点对点实时协作，零配置即连即用
+- **LAN IP 检测**：自动检测公网/局域网/Radmin 虚拟网卡地址
 - **项目共享** - 邀请团队成员协作
 - **角色权限** - 所有者/编辑者/查看者 三级权限，支持转让与移除
 - **协作活动流** - 实时同步团队成员操作
 - **团队仪表盘** - 成员统计、活跃概览、同步状态一目了然
 - **孤儿数据清理** - 远端项目删除后自动清理本地残留数据
-- **数据同步** - 云端同步支持多设备访问
+- **数据同步** - Supabase 云端同步支持多设备访问
 
 ### UI/UX
 - **通知中心** - 铃铛图标+未读计数，任务/协作事件自动推送
@@ -98,7 +100,10 @@
 | 里程碑 | `/milestones` | 项目里程碑进度管理 |
 | 日记 | `/diary` | 每日开发日志，代码高亮 |
 | 甘特图 | `/gantt` | 任务时间线视图 |
-| 分析 | `/analytics` | 数据统计和成就系统 |
+| 日历 | `/calendar` | 月/周/日视图，聚合任务+里程碑+事件 |
+| 冲刺管理 | `/sprints` | Sprint 创建、任务拖拽分配、进度追踪 |
+| 成就 | `/achievements` | 27 项成就，铜银金三级，进度条展示 |
+| 分析 | `/analytics` | 数据统计、燃尽图、CFD、热力图 |
 | 团队协作 | `/collaboration` | 团队管理和仪表盘 (Beta) |
 | AI 指令 | `/ai-command` | AI 智能创建任务/里程碑/日记 |
 | 设置 | `/settings` | 应用配置、快捷键、数据导入导出 |
@@ -114,8 +119,9 @@ npm install
 ### 开发模式
 
 ```bash
-npm run dev
+npm run dev -- --host
 ```
+或直接双击 `start.bat` 启动（已内置 `--host` 监听所有网卡）。
 
 打开 http://localhost:5173 查看应用。
 
