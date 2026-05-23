@@ -22,6 +22,12 @@
 - **番茄计时器** - 自定义工作/休息时长，短长休息轮换
 - **专注会话统计** - 记录每日专注时长，分析工作效率
 
+### AI 智能助手
+- **AI 指令中心** - 自然语言创建任务、里程碑、日记、时间线事件
+- **模型切换** - DeepSeek V4 Flash（快速）/ V4 Pro（强力）自由选择
+- **推理力度控制** - off / high / max 三档，按需平衡质量与 token 消耗
+- **一键执行** - 生成计划后确认即可批量落地，支持自动同步
+
 ### 数据分析
 - **活动热力图** - 可视化每日工作活跃度
 - **统计面板** - 任务完成率、进行中任务、紧急待处理
@@ -73,6 +79,7 @@
 | 甘特图 | `/gantt` | 任务时间线视图 |
 | 分析 | `/analytics` | 数据统计和成就系统 |
 | 团队协作 | `/collaboration` | 团队管理 (Beta) |
+| AI 指令 | `/ai-command` | AI 智能创建任务/里程碑/日记 |
 | 设置 | `/settings` | 应用配置和偏好 |
 
 ## 快速开始
@@ -122,6 +129,10 @@ cp .env.example .env
 ```env
 VITE_SUPABASE_URL=你的Project URL
 VITE_SUPABASE_ANON_KEY=你的anon密钥
+
+# DeepSeek API Key（AI 指令功能需要，可选）
+# 在 https://platform.deepseek.com/api_keys 创建
+VITE_DEEPSEEK_API_KEY=sk-your-deepseek-api-key
 ```
 
 ### 步骤 3：创建数据库表
@@ -176,8 +187,7 @@ src/
 
 - [ ] 浏览器通知推送
 - [ ] 移动端适配
-- [ ] 数据导入/导出
-- [ ] 任务标签系统
+- [ ] AI 多轮对话优化
 - [ ] 循环任务
 
 ## 许可证

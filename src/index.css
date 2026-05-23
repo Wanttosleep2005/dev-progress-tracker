@@ -118,6 +118,8 @@ body {
 
 .custom-select {
   color-scheme: dark;
+  color: #e2e8f0;
+  background-color: #0f172a;
 }
 
 .custom-select option,
@@ -128,7 +130,7 @@ body {
 
 .custom-select option:checked {
   color: #ffffff;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.95), rgba(56, 189, 248, 0.75));
+  background-color: #4338ca;
 }
 
 .custom-select option:hover,

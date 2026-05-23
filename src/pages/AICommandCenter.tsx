@@ -3,6 +3,7 @@ import { Bot, CheckCircle2, Loader2, Play, Settings2, Sparkles, Wand2, X } from 
 import { useAICommandStore } from '../stores/useAICommandStore';
 import { useAppStore } from '../stores/useAppStore';
 import { PRIORITY_LABELS, STATUS_LABELS } from '../types';
+import type { AICommandSettings } from '../types';
 
 const actionLabels = {
   create_task: '创建任务',
@@ -102,8 +103,18 @@ export default function AICommandCenter() {
             API 接口设置
           </div>
           <div className="space-y-3">
-            <label className="block text-xs text-slate-500">DeepSeek 模型
-              <input value={settings.model} onChange={event => updateSettings({ model: event.target.value })} className="mt-1 w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white" />
+            <label className="block text-xs text-slate-500">模型选择
+              <select value={settings.model} onChange={event => updateSettings({ model: event.target.value })} className="custom-select mt-1 w-full rounded-xl border border-white/[0.06] px-3 py-2 text-sm">
+                <option value="deepseek-v4-flash">DeepSeek V4 Flash（快速）</option>
+                <option value="deepseek-v4-pro">DeepSeek V4 Pro（强力）</option>
+              </select>
+            </label>
+            <label className="block text-xs text-slate-500">推理力度
+              <select value={settings.reasoningEffort} onChange={event => updateSettings({ reasoningEffort: event.target.value as AICommandSettings['reasoningEffort'] })} className="custom-select mt-1 w-full rounded-xl border border-white/[0.06] px-3 py-2 text-sm">
+                <option value="off">关闭 — 不推理，最快最省 token</option>
+                <option value="high">高 — 默认推理强度</option>
+                <option value="max">最强 — 深度推理，适合复杂多动作场景</option>
+              </select>
             </label>
             <label className="block text-xs text-slate-500">接口地址
               <input value={settings.endpoint} onChange={event => updateSettings({ endpoint: event.target.value })} className="mt-1 w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white" />

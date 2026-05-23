@@ -137,35 +137,77 @@ function unmarkRemoteProjectDeleted(remoteProjectId: string) {
   localStorage.setItem(DELETED_REMOTE_PROJECTS_KEY, JSON.stringify([...ids]));
 }
 
-async function supabaseFetch(path: string, init: RequestInit = {}, token?: string) {
+async function refreshAccessToken(refreshToken: string): Promise<CloudSession | null> {
+  const config = assertConfigured();
+  try {
+    const resp = await fetch(`${config.url}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { apikey: config.anonKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!resp.ok) return null;
+    const payload = await resp.json() as SupabaseAuthResponse;
+    return {
+      accessToken: payload.access_token,
+      refreshToken: payload.refresh_token || refreshToken,
+      user: normalizeUser(payload),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function supabaseFetch(path: string, init: RequestInit = {}, token?: string): Promise<unknown> {
   const config = assertConfigured();
   const requiresUserToken = token !== undefined;
   if (requiresUserToken && !token) {
     throw new Error('登录凭证已失效，请退出后重新登录。');
   }
-  let response: Response;
-  try {
-    response = await fetch(`${config.url}${path}`, {
-      ...init,
-      headers: {
-        apikey: config.anonKey,
-        Authorization: `Bearer ${requiresUserToken ? token : config.anonKey}`,
-        'Content-Type': 'application/json',
-        ...(init.headers || {}),
-      },
-    });
-  } catch {
-    throw new Error('无法连接 Supabase。请检查 VITE_SUPABASE_URL 是否正确、当前网络是否可访问 Supabase，以及部署环境是否已经配置环境变量。');
+  let currentToken = token;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(`${config.url}${path}`, {
+        ...init,
+        headers: {
+          apikey: config.anonKey,
+          Authorization: `Bearer ${requiresUserToken ? currentToken : config.anonKey}`,
+          'Content-Type': 'application/json',
+          ...(init.headers || {}),
+        },
+      });
+    } catch {
+      throw new Error('无法连接 Supabase。请检查 VITE_SUPABASE_URL 是否正确、当前网络是否可访问 Supabase，以及部署环境是否已经配置环境变量。');
+    }
+
+    if (response.ok) {
+      if (response.status === 204) return null;
+      const text = await response.text();
+      return text ? JSON.parse(text) : null;
+    }
+
+    // JWT 过期时尝试刷新 token 并重试一次
+    const body = await response.text().catch(() => '');
+    const isJwtExpired = body.includes('JWT expired') || body.includes('JWTExpired') || response.status === 401;
+    if (isJwtExpired && attempt === 0 && requiresUserToken) {
+      const session = loadCloudSession();
+      if (session?.refreshToken) {
+        const newSession = await refreshAccessToken(session.refreshToken);
+        if (newSession) {
+          saveCloudSession(newSession);
+          currentToken = newSession.accessToken;
+          continue;
+        }
+      }
+      // 刷新失败，清除登录状态
+      saveCloudSession(null);
+      throw new Error('登录凭证已过期，请重新登录。');
+    }
+
+    throw new Error(body || response.statusText);
   }
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || response.statusText);
-  }
-
-  if (response.status === 204) return null;
-  const text = await response.text();
-  return text ? JSON.parse(text) : null;
+  throw new Error('请求失败');
 }
 
 function normalizeUser(payload: SupabaseAuthResponse): User {

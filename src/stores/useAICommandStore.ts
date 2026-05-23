@@ -14,6 +14,10 @@ const STORAGE_KEY = 'devtrack-ai-command-settings';
 function loadSettings(): AICommandSettings {
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    // 开发环境强制使用 Vite 代理路径，忽略 localStorage 中的旧端点
+    if (import.meta.env.DEV) {
+      return { ...defaultAICommandSettings, ...stored, endpoint: defaultAICommandSettings.endpoint, apiKey: '' };
+    }
     return { ...defaultAICommandSettings, ...stored, apiKey: '' };
   } catch {
     return defaultAICommandSettings;
@@ -92,11 +96,11 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
             priority: action.priority,
             tags: action.tags,
             dueDate: action.dueDate || null,
-            plannedStartAt: null,
-            plannedEndAt: action.dueDate || null,
+            plannedStartAt: action.plannedStartAt || null,
+            plannedEndAt: action.plannedEndAt || action.dueDate || null,
             milestoneId: null,
             estimatedMinutes: action.estimatedMinutes || null,
-            url: '',
+            url: action.url || '',
             source: action.type === 'create_today_task' ? 'daily' : 'board',
             remindAt: action.type === 'create_today_task' ? action.remindAt || null : null,
             isTodayTask: action.type === 'create_today_task',
@@ -117,9 +121,9 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
             title: action.title,
             description: action.description,
             dueDate: action.dueDate || null,
-            type: action.milestoneType,
+            type: action.milestoneType || 'progress',
             progress: 0,
-            status: 'upcoming',
+            status: action.milestoneStatus || 'upcoming',
             taskIds: [],
             createdBy: null,
             updatedBy: null,
@@ -145,7 +149,7 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
             description: action.description,
             type: action.eventType,
             date: action.date || new Date().toISOString().split('T')[0],
-            relatedTaskId: null,
+            relatedTaskId: Number(action.relatedTaskId) || null,
           });
         }
 

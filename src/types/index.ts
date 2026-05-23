@@ -247,6 +247,7 @@ export interface AICommandSettings {
   apiKey: string;
   endpoint: string;
   model: string;
+  reasoningEffort: 'off' | 'high' | 'max';
   autoSyncAfterExecute: boolean;
 }
 
@@ -264,6 +265,11 @@ export interface AICommandAction {
   eventType: EventType;
   milestoneType: MilestoneType;
   targetStatus: TaskStatus;
+  milestoneStatus: MilestoneStatus;
+  url: string;
+  plannedStartAt: string;
+  plannedEndAt: string;
+  relatedTaskId: string;
 }
 
 export interface AICommandPlan {
