@@ -422,6 +422,35 @@ export default function SettingsPage() {
               });
               pc.close();
 
+              // Phase 2: scan Radmin virtual adapter
+              // Radmin VPN uses 26.0.0.0/8. Try each detected IP's host portion with Radmin prefix.
+              if (ips.size > 0) {
+                const candidates: string[] = [];
+                for (const ip of ips) {
+                  const parts = ip.split('.');
+                  if (parts.length === 4 && !ip.startsWith('26.')) {
+                    // Construct: detected IP's host parts with Radmin /8 prefix
+                    candidates.push(`26.${parts[2]}.${parts[3]}`);
+                    // Also try common Radmin second octets: 0-30
+                    for (const b of [0, 1, 2, 3, 27]) {
+                      candidates.push(`26.${b}.${parts[2]}.${parts[3]}`);
+                    }
+                  }
+                }
+
+                const scanResults = await Promise.allSettled(
+                  [...new Set(candidates)].slice(0, 12).map(async (c) => {
+                    const ctrl = new AbortController();
+                    setTimeout(() => ctrl.abort(), 600);
+                    await fetch(`http://${c}:5173`, { signal: ctrl.signal, mode: 'no-cors' });
+                    return c;
+                  })
+                );
+                for (const r of scanResults) {
+                  if (r.status === 'fulfilled') ips.add(r.value);
+                }
+              }
+
               if (ips.size > 0) {
                 const list = [...ips].sort();
                 // Also include current hostname if not localhost
