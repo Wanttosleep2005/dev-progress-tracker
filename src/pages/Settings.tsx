@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Bell, Database, Download, Eye, FileText, Info, Keyboard, Settings, Sparkles, Trash2, Upload } from 'lucide-react';
+import { Bell, Database, Download, Eye, FileText, Info, Keyboard, Network, Settings, Sparkles, Trash2, Upload } from 'lucide-react';
 import { db } from '../db/database';
 import { buildWeeklyReport } from '../lib/reporting';
 import { useAppStore } from '../stores/useAppStore';
@@ -11,6 +11,7 @@ import { useTheme } from '../stores/useTheme';
 import { usePreferences } from '../stores/usePreferences';
 import { useSidebarStore } from '../stores/useSidebarStore';
 import { useNotificationStore } from '../stores/useNotificationStore';
+import { getCustomBaseUrl, setCustomBaseUrl } from '../lib/cloudSync';
 import TimePicker from '../components/ui/TimePicker';
 import type { TaskPriority, TaskStatus } from '../types';
 
@@ -37,6 +38,7 @@ export default function SettingsPage() {
       };
     } catch { return {}; }
   });
+  const [baseUrl, setBaseUrl] = useState(() => getCustomBaseUrl());
 
   useEffect(() => {
     import('../../package.json')
@@ -380,6 +382,105 @@ export default function SettingsPage() {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="glass rounded-3xl p-5">
+        <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <Network size={16} className="text-emerald-300" />
+          局域网访问（邀请链接基地址）
+        </h3>
+        <p className="mb-4 text-xs text-slate-500">
+          在局域网内分享邀请链接时，将基地址设为本机 LAN IP，团队成员即可通过链接访问你的 DevTrack。
+        </p>
+        <div className="mb-3 flex items-center gap-2">
+          <button
+            onClick={async () => {
+              // Try to detect LAN IP using WebRTC with explicit STUN server
+              // Some browsers return mDNS .local addresses, so we filter those out
+              const ips = new Set<string>();
+              const pc = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+              });
+              pc.createDataChannel('');
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+
+              const gotIp = await new Promise<string | null>(resolve => {
+                const timeout = setTimeout(() => resolve(null), 4000);
+                pc.onicecandidate = (e) => {
+                  if (!e.candidate) { clearTimeout(timeout); resolve(null); return; }
+                  const candidate = e.candidate.candidate;
+                  // Parse IP from candidate string: "candidate:... ... IP port typ ..."
+                  const parts = candidate.split(' ');
+                  const ipIdx = parts.indexOf('typ') - 2;
+                  if (ipIdx > 0) {
+                    const ip = parts[ipIdx];
+                    // Filter out mDNS (.local), IPv6 (:), loopback
+                    if (ip && !ip.includes(':') && !ip.includes('.local') && ip !== '127.0.0.1' && !ip.startsWith('0.')) {
+                      ips.add(ip);
+                    }
+                  }
+                };
+              });
+              pc.close();
+
+              if (ips.size > 0) {
+                const ip = [...ips][0];
+                const url = `http://${ip}:5173`;
+                setBaseUrl(url);
+                setCustomBaseUrl(url);
+                setMessage(`已检测到 LAN IP：${ip}`);
+              } else {
+                // Fallback: try using hostname
+                const host = window.location.hostname;
+                if (host && host !== 'localhost' && host !== '127.0.0.1') {
+                  const url = `http://${host}:5173`;
+                  setBaseUrl(url);
+                  setCustomBaseUrl(url);
+                  setMessage(`已使用当前地址：${host}`);
+                } else {
+                  setMessage('未检测到有效局域网 IP，请手动输入（Windows: 终端运行 ipconfig 查看 IPv4 地址）');
+                }
+              }
+            }}
+            className="rounded-xl border border-sky-500/20 bg-sky-500/10 px-3 py-1.5 text-xs text-sky-200 hover:bg-sky-500/20"
+          >
+            自动检测
+          </button>
+          <span className="text-[10px] text-slate-600">或手动输入（Windows: <code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono">ipconfig</code> 查看 IPv4 地址）</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <input
+            value={baseUrl}
+            onChange={e => setBaseUrl(e.target.value)}
+            placeholder={window.location.hostname !== 'localhost' ? `http://${window.location.hostname}:5173` : 'http://192.168.x.x:5173'}
+            className="flex-1 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-emerald-500/50 focus:outline-none"
+          />
+          <button
+            onClick={() => {
+              setCustomBaseUrl(baseUrl);
+              setMessage('邀请链接基地址已更新，重新生成邀请链接即可生效');
+            }}
+            className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-300 hover:bg-emerald-500/20"
+          >
+            保存
+          </button>
+          {baseUrl && (
+            <button
+              onClick={() => {
+                setCustomBaseUrl('');
+                setBaseUrl('');
+                setMessage('已恢复默认基地址');
+              }}
+              className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-xs text-slate-400 hover:bg-white/[0.05]"
+            >
+              重置
+            </button>
+          )}
+        </div>
+        <p className="mt-3 text-[10px] text-slate-600">
+          启动开发服务器时请使用 <code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono">npm run dev -- --host</code> 以暴露到局域网。
+        </p>
       </div>
 
       <div className="glass rounded-3xl p-5">

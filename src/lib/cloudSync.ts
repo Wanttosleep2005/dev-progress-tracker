@@ -579,9 +579,31 @@ export async function addLocalTeamMember(member: Omit<TeamMember, 'id' | 'joined
   return db.teamMembers.add({ ...member, joinedAt: new Date().toISOString() });
 }
 
-function getAppBaseUrl() {
+const APP_BASE_URL_KEY = 'devtrack-app-base-url';
+
+export function getAppBaseUrl() {
+  const custom = getCustomBaseUrl();
+  if (custom) return custom.replace(/\/$/, '');
   const base = import.meta.env.BASE_URL || '/';
   return new URL(base, window.location.origin).toString().replace(/\/$/, '');
+}
+
+export function getCustomBaseUrl(): string {
+  try {
+    return localStorage.getItem(APP_BASE_URL_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setCustomBaseUrl(url: string) {
+  try {
+    if (url) {
+      localStorage.setItem(APP_BASE_URL_KEY, url);
+    } else {
+      localStorage.removeItem(APP_BASE_URL_KEY);
+    }
+  } catch { /* localStorage unavailable */ }
 }
 
 export function buildInviteUrl(projectId: number, role: TeamMember['role']) {

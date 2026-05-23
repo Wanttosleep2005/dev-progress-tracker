@@ -287,7 +287,7 @@ export default function Collaboration() {
                       </div>
                     ) : (
                       <button
-                        disabled={cantModify || me}
+                        disabled={cantModify}
                         onClick={() => member.id && setRemoveConfirm(member.id)}
                         className="rounded-xl px-3 py-2 text-xs text-red-300 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
                       >移除</button>

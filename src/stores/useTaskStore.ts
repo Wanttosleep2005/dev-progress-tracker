@@ -130,13 +130,21 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       : changes.dependencyIds
         ? { ...changes, dependsOn: changes.dependencyIds }
         : changes;
-    await db.updateTask(id, normalizedChanges);
+    const prevTask = { ...task };
+    set(state => ({ tasks: state.tasks.map(t => t.id === id ? { ...t, ...normalizedChanges } : t) }));
 
-    if (changes.status && changes.status !== task.status) {
-      await recordTaskStatusChanged({ ...task, ...changes }, task.status, changes.status);
+    try {
+      await db.updateTask(id, normalizedChanges);
+    } catch {
+      set(state => ({ tasks: state.tasks.map(t => t.id === id ? prevTask : t) }));
+      return;
+    }
+
+    if (changes.status && changes.status !== prevTask.status) {
+      recordTaskStatusChanged({ ...task, ...changes }, prevTask.status, changes.status).catch(() => {});
       if (changes.status === 'done') {
         const user = useCloudStore.getState().user;
-        await recordCollaborationEvent({
+        recordCollaborationEvent({
           projectId: task.projectId,
           remoteProjectId: useAppStore.getState().projects.find(project => project.id === task.projectId)?.remoteProjectId ?? null,
           userId: user?.id ?? null,
@@ -146,23 +154,22 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
           targetId: id,
           title: `完成了任务「${task.title}」`,
           description: `${user?.displayName ?? '本地用户'} 完成了任务「${task.title}」`,
-        });
-        await generateNextRecurringTask({ ...task, ...changes });
-        await useNotificationCenterStore.getState().add('milestone_done', '任务已完成', `「${task.title}」已标记为完成`, '/tasks', task.projectId);
+        }).catch(() => {});
+        generateNextRecurringTask({ ...task, ...changes }).catch(() => {});
+        useNotificationCenterStore.getState().add('milestone_done', '任务已完成', `「${task.title}」已标记为完成`, '/tasks', task.projectId);
       }
     }
 
     const nextMilestoneId = changes.milestoneId ?? task.milestoneId;
     const milestoneChanged = Object.prototype.hasOwnProperty.call(changes, 'milestoneId') && changes.milestoneId !== task.milestoneId;
-    const statusChanged = changes.status && changes.status !== task.status;
+    const statusChanged = changes.status && changes.status !== prevTask.status;
 
     if (milestoneChanged || statusChanged) {
-      await refreshMilestonesForTaskChange(task.projectId, task.milestoneId, nextMilestoneId);
-      await useMilestoneStore.getState().load(task.projectId);
+      refreshMilestonesForTaskChange(task.projectId, task.milestoneId, nextMilestoneId)
+        .then(() => useMilestoneStore.getState().load(task.projectId))
+        .catch(() => {});
     }
-
-    await get().load(task.projectId);
-    await useAppStore.getState().checkAchievements();
+    useAppStore.getState().checkAchievements().catch(() => {});
   },
 
   remove: async (id) => {
@@ -194,11 +201,17 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       }
     }
 
-    await db.updateTask(id, { status });
-    await recordTaskStatusChanged({ ...task, status }, task.status, status);
+    set(state => ({ tasks: state.tasks.map(t => t.id === id ? { ...t, status } : t) }));
+    try {
+      await db.updateTask(id, { status });
+    } catch {
+      set(state => ({ tasks: state.tasks.map(t => t.id === id ? { ...t, status: task.status } : t) }));
+      return;
+    }
+    recordTaskStatusChanged({ ...task, status }, task.status, status).catch(() => {});
     if (status === 'done') {
       const user = useCloudStore.getState().user;
-      await recordCollaborationEvent({
+      recordCollaborationEvent({
         projectId: task.projectId,
         remoteProjectId: useAppStore.getState().projects.find(project => project.id === task.projectId)?.remoteProjectId ?? null,
         userId: user?.id ?? null,
@@ -208,13 +221,13 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         targetId: id,
         title: `完成了任务「${task.title}」`,
         description: `${user?.displayName ?? '本地用户'} 完成了任务「${task.title}」`,
-      });
-      await generateNextRecurringTask({ ...task, status });
-      await useNotificationCenterStore.getState().add('milestone_done', '任务已完成', `「${task.title}」已标记为完成`, '/tasks', task.projectId);
+      }).catch(() => {});
+      generateNextRecurringTask({ ...task, status }).catch(() => {});
+      useNotificationCenterStore.getState().add('milestone_done', '任务已完成', `「${task.title}」已标记为完成`, '/tasks', task.projectId);
     }
-    await refreshMilestonesForTaskChange(task.projectId, task.milestoneId, task.milestoneId);
-    await useMilestoneStore.getState().load(task.projectId);
-    await get().load(task.projectId);
-    await useAppStore.getState().checkAchievements();
+    refreshMilestonesForTaskChange(task.projectId, task.milestoneId, task.milestoneId)
+      .then(() => useMilestoneStore.getState().load(task.projectId))
+      .catch(() => {});
+    useAppStore.getState().checkAchievements().catch(() => {});
   },
 }));

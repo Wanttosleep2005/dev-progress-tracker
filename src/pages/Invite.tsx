@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Cloud, LogIn, UserPlus } from 'lucide-react';
@@ -31,12 +31,40 @@ export default function Invite() {
   const { token } = useParams();
   const navigate = useNavigate();
   const invite = useMemo(() => decodeInvite(token), [token]);
-  const { session, joinProject, loading, error } = useCloudStore();
+  const { session, signIn, signUp, joinProject, loading, error } = useCloudStore();
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [mode, setMode] = useState<'login' | 'register'>('register');
+  const [authError, setAuthError] = useState('');
 
   const handleJoin = async () => {
     if (!invite?.remoteProjectId || !invite.role) return;
     await joinProject(invite.remoteProjectId, invite.role);
     navigate('/collaboration');
+  };
+
+  const handleAuth = async () => {
+    if (!email.trim() || !password.trim()) {
+      setAuthError('请填写邮箱和密码。');
+      return;
+    }
+    setAuthError('');
+    try {
+      if (mode === 'register') {
+        await signUp(email.trim(), password.trim(), displayName.trim() || email.trim().split('@')[0]);
+      } else {
+        await signIn(email.trim(), password.trim());
+      }
+      // 注册/登录成功后自动加入项目
+      if (invite?.remoteProjectId && invite.role) {
+        await joinProject(invite.remoteProjectId, invite.role);
+      }
+      navigate('/collaboration');
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : '操作失败');
+    }
   };
 
   return (
@@ -57,6 +85,7 @@ export default function Invite() {
               <p className="mt-1 text-sm font-semibold text-cyan-200">{roleLabels[invite.role || 'viewer']}</p>
             </div>
             {error && <p className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-200">{error}</p>}
+            {authError && <p className="rounded-2xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">{authError}</p>}
             {session ? (
               <button
                 onClick={handleJoin}
@@ -67,10 +96,52 @@ export default function Invite() {
                 确认加入项目
               </button>
             ) : (
-              <Link to="/collaboration" className="mx-auto flex w-fit items-center gap-2 rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-medium text-white hover:bg-cyan-600">
-                <LogIn size={16} />
-                先登录账户
-              </Link>
+              <div className="space-y-3">
+                <div className="flex gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-1">
+                  <button
+                    onClick={() => { setMode('register'); setAuthError(''); }}
+                    className={`flex-1 rounded-xl px-3 py-1.5 text-xs font-medium ${mode === 'register' ? 'bg-cyan-500/20 text-cyan-200' : 'text-slate-400 hover:text-slate-300'}`}
+                  >
+                    创建账号
+                  </button>
+                  <button
+                    onClick={() => { setMode('login'); setAuthError(''); }}
+                    className={`flex-1 rounded-xl px-3 py-1.5 text-xs font-medium ${mode === 'login' ? 'bg-cyan-500/20 text-cyan-200' : 'text-slate-400 hover:text-slate-300'}`}
+                  >
+                    已有账号
+                  </button>
+                </div>
+                {mode === 'register' && (
+                  <input
+                    value={displayName}
+                    onChange={e => setDisplayName(e.target.value)}
+                    placeholder="显示名称（可选）"
+                    className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-cyan-500/50 focus:outline-none"
+                  />
+                )}
+                <input
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="邮箱"
+                  type="email"
+                  className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-cyan-500/50 focus:outline-none"
+                />
+                <input
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="密码"
+                  type="password"
+                  className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-cyan-500/50 focus:outline-none"
+                />
+                <button
+                  onClick={handleAuth}
+                  disabled={loading}
+                  className="mx-auto flex items-center gap-2 rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-medium text-white hover:bg-cyan-600 disabled:opacity-50"
+                >
+                  {mode === 'register' ? <UserPlus size={16} /> : <LogIn size={16} />}
+                  {mode === 'register' ? '注册并加入项目' : '登录并加入项目'}
+                </button>
+              </div>
             )}
           </div>
         )}

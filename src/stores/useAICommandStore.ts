@@ -88,6 +88,7 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
     try {
       for (const action of plan.actions) {
         if (action.type === 'create_task' || action.type === 'create_today_task') {
+          const depIds = (action.dependencyIds || []).map(Number).filter(Boolean);
           await useTaskStore.getState().add({
             projectId: currentProjectId,
             title: action.title,
@@ -98,22 +99,47 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
             dueDate: action.dueDate || null,
             plannedStartAt: action.plannedStartAt || null,
             plannedEndAt: action.plannedEndAt || action.dueDate || null,
-            milestoneId: null,
+            milestoneId: action.relatedTaskId ? Number(action.relatedTaskId) || null : null,
             estimatedMinutes: action.estimatedMinutes || null,
+            pomodoroGoal: action.pomodoroGoal ?? null,
             url: action.url || '',
             source: action.type === 'create_today_task' ? 'daily' : 'board',
             remindAt: action.type === 'create_today_task' ? action.remindAt || null : null,
             isTodayTask: action.type === 'create_today_task',
             publishedAt: action.type === 'create_today_task' ? new Date().toISOString() : null,
             assigneeId: null,
-            dependencyIds: [],
-            dependsOn: [],
+            dependencyIds: depIds,
+            dependsOn: depIds,
+            subtasks: action.subtasks,
             createdBy: null,
             updatedBy: null,
             remoteId: null,
             syncUpdatedAt: null,
             recurrence: 'none',
           });
+        }
+
+        if (action.type === 'update_task') {
+          const taskId = Number(action.taskId);
+          if (taskId) {
+            const changes: Record<string, unknown> = {};
+            if (action.title) changes.title = action.title;
+            if (action.description) changes.description = action.description;
+            if (action.targetStatus) changes.status = action.targetStatus;
+            if (action.priority) changes.priority = action.priority;
+            if (action.dueDate) changes.dueDate = action.dueDate;
+            if (action.estimatedMinutes !== undefined && action.estimatedMinutes !== 0) changes.estimatedMinutes = action.estimatedMinutes;
+            if (action.pomodoroGoal !== undefined) changes.pomodoroGoal = action.pomodoroGoal;
+            if (action.tags?.length) changes.tags = action.tags;
+            if (action.subtasks) changes.subtasks = action.subtasks;
+            if (action.dependencyIds?.length) {
+              const ids = action.dependencyIds.map(Number).filter(Boolean);
+              changes.dependencyIds = ids;
+              changes.dependsOn = ids;
+            }
+            if (action.relatedTaskId) changes.milestoneId = Number(action.relatedTaskId) || null;
+            await useTaskStore.getState().update(taskId, changes as Partial<import('../types').Task>);
+          }
         }
 
         if (action.type === 'create_milestone') {
@@ -132,6 +158,18 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
             syncUpdatedAt: null,
             recurrence: 'none',
           });
+        }
+
+        if (action.type === 'update_milestone') {
+          const milestoneId = Number(action.taskId);
+          if (milestoneId) {
+            const changes: Record<string, unknown> = {};
+            if (action.milestoneStatus) changes.status = action.milestoneStatus;
+            if (action.title) changes.title = action.title;
+            if (action.description) changes.description = action.description;
+            if (action.dueDate) changes.dueDate = action.dueDate;
+            await useMilestoneStore.getState().update(milestoneId, changes);
+          }
         }
 
         if (action.type === 'create_diary') {
@@ -156,10 +194,18 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
         }
 
         if (action.type === 'configure_pomodoro') {
-          usePomodoroStore.getState().updateConfig({
-            workMinutes: action.estimatedMinutes > 0 ? action.estimatedMinutes : usePomodoroStore.getState().config.workMinutes,
-            dailyGoal: Math.max(1, action.tags.find(tag => tag.startsWith('goal:')) ? Number(action.tags.find(tag => tag.startsWith('goal:'))?.replace('goal:', '')) || 1 : usePomodoroStore.getState().config.dailyGoal),
-          });
+          const configPatch: Partial<{ workMinutes: number; shortBreakMinutes: number; longBreakMinutes: number; longBreakInterval: number; dailyGoal: number }> = {};
+          if (action.estimatedMinutes > 0) configPatch.workMinutes = action.estimatedMinutes;
+          for (const tag of action.tags) {
+            if (tag.startsWith('goal:')) configPatch.dailyGoal = Math.max(1, Number(tag.replace('goal:', '')) || 1);
+            if (tag.startsWith('work:')) configPatch.workMinutes = Number(tag.replace('work:', '')) || configPatch.workMinutes || 25;
+            if (tag.startsWith('break_short:')) configPatch.shortBreakMinutes = Number(tag.replace('break_short:', '')) || 5;
+            if (tag.startsWith('break_long:')) configPatch.longBreakMinutes = Number(tag.replace('break_long:', '')) || 15;
+            if (tag.startsWith('interval:')) configPatch.longBreakInterval = Math.max(2, Number(tag.replace('interval:', '')) || 4);
+          }
+          if (Object.keys(configPatch).length > 0) {
+            usePomodoroStore.getState().updateConfig(configPatch);
+          }
         }
       }
 

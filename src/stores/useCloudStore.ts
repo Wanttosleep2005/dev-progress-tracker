@@ -22,6 +22,7 @@ import {
   type CloudSession,
 } from '../lib/cloudSync';
 import { useAppStore } from './useAppStore';
+import { useToast } from './useToast';
 import { useNotificationCenterStore } from './useNotificationCenterStore';
 
 interface CloudStore {
@@ -149,17 +150,35 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
     if (session && project?.remoteProjectId) {
       try {
         const remoteMembers = await fetchRemoteMembers(session, project.remoteProjectId);
-        await db.teamMembers.where('projectId').equals(projectId).delete();
-        await db.teamMembers.bulkAdd(remoteMembers.map(member => ({
-          projectId,
-          userId: member.user_id,
-          role: member.role,
-          email: member.email,
-          displayName: member.display_name,
-          joinedAt: member.joined_at,
-          online: false,
-          lastSeenAt: member.last_seen_at ?? null,
-        })));
+        const remoteUserIds = new Set(remoteMembers.map(m => m.user_id));
+        for (const member of remoteMembers) {
+          const existing = await db.teamMembers.where({ projectId, userId: member.user_id }).first();
+          if (existing?.id) {
+            await db.teamMembers.update(existing.id, {
+              role: member.role,
+              email: member.email,
+              displayName: member.display_name,
+              joinedAt: member.joined_at,
+              lastSeenAt: member.last_seen_at ?? null,
+            });
+          } else {
+            await addLocalTeamMember({
+              projectId,
+              userId: member.user_id,
+              role: member.role,
+              email: member.email,
+              displayName: member.display_name,
+              online: false,
+              lastSeenAt: member.last_seen_at ?? null,
+            });
+          }
+        }
+        const localMembers = await db.teamMembers.where('projectId').equals(projectId).toArray();
+        for (const local of localMembers) {
+          if (!remoteUserIds.has(local.userId)) {
+            await db.teamMembers.delete(local.id!);
+          }
+        }
       } catch {
         // Keep local team cache when remote member refresh fails.
       }
@@ -174,6 +193,10 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
 
   inviteByEmail: async (projectId, email, role) => {
     const session = get().session;
+    if (session?.user.email === email) {
+      useToast.getState().add('你不能邀请自己加入项目。', 'warning');
+      return;
+    }
     const project = await db.projects.get(projectId);
     const userId = `email:${email}`;
     if (session && project?.remoteProjectId) {
@@ -230,7 +253,7 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
       await deleteRemoteMember(session, project.remoteProjectId, member.userId);
     }
     await db.teamMembers.delete(memberId);
-    if (member) await get().loadTeam(member.projectId);
+    set(state => ({ members: state.members.filter(m => m.id !== memberId) }));
   },
 
   transferOwnership: async (projectId, targetMemberId) => {

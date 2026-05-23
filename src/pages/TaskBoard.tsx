@@ -124,12 +124,18 @@ export default function TaskBoard() {
 
   const handleColumnDrop = async (event: ReactDragEvent<HTMLDivElement>, status: TaskStatus) => {
     event.preventDefault();
-    const taskId = Number(event.dataTransfer.getData('text/plain'));
+    event.stopPropagation();
     setDragOverColumn(null);
+    const taskId = Number(event.dataTransfer.getData('text/plain'));
     if (!taskId) return;
     const task = tasks.find(item => item.id === taskId);
     if (!task || task.status === status) return;
-    await moveStatus(taskId, status);
+    if (!canEditProject) return;
+    try {
+      await moveStatus(taskId, status);
+    } catch {
+      // moveStatus handles its own error display
+    }
     setDraggedTaskId(null);
   };
 
@@ -533,7 +539,7 @@ export default function TaskBoard() {
                 setDragOverMilestone(milestone.id ?? null);
               }}
               onDragLeave={() => setDragOverMilestone(null)}
-                    onDrop={event => canEditProject && handleMilestoneDrop(event, milestone.id ?? null)}
+                    onDrop={event => { event.preventDefault(); handleMilestoneDrop(event, milestone.id ?? null); }}
               className={`rounded-2xl border p-4 transition-all ${dragOverMilestone === milestone.id ? 'scale-[1.01] border-cyan-400/30 bg-cyan-500/10' : 'border-white/[0.06] bg-white/[0.02]'}`}
             >
               <div className="mb-3 flex items-start justify-between gap-2">
@@ -559,7 +565,7 @@ export default function TaskBoard() {
               setDragOverMilestone(-1);
             }}
             onDragLeave={() => setDragOverMilestone(null)}
-            onDrop={event => canEditProject && handleMilestoneDrop(event, null)}
+            onDrop={event => { event.preventDefault(); handleMilestoneDrop(event, null); }}
             className={`rounded-2xl border border-dashed p-4 transition-all ${dragOverMilestone === -1 ? 'border-slate-300/40 bg-white/[0.05]' : 'border-white/[0.08] bg-transparent'}`}
           >
             <h4 className="text-sm font-semibold text-white">未关联</h4>
@@ -579,7 +585,7 @@ export default function TaskBoard() {
                   setDragOverColumn(column.status);
                 }}
                 onDragLeave={() => setDragOverColumn(null)}
-                onDrop={event => canEditProject && handleColumnDrop(event, column.status)}
+                onDrop={event => { event.preventDefault(); handleColumnDrop(event, column.status); }}
                 className={`flex min-h-[420px] flex-col rounded-[28px] border p-3 transition-all ${columnStyles[column.status]} ${dragOverColumn === column.status ? 'scale-[1.01] ring-2 ring-sky-500/20' : ''}`}
               >
                 <div className="mb-3 flex items-center justify-between px-2">
