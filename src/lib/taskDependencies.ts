@@ -1,7 +1,8 @@
 import type { Task } from '../types';
 
 export function getTaskDependencyIds(task: Task): number[] {
-  return [...new Set([...(task.dependsOn ?? []), ...(task.dependencyIds ?? [])])].filter(id => Number.isFinite(id));
+  const legacyIds = (task as Task & { dependencyIds?: number[] }).dependencyIds ?? [];
+  return [...new Set([...(task.dependsOn ?? []), ...legacyIds])].filter(id => Number.isFinite(id));
 }
 
 export function getTaskDependencies(task: Task, tasks: Task[]): Task[] {

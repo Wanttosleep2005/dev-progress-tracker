@@ -33,6 +33,7 @@ export default function Timeline() {
   const [newDesc, setNewDesc] = useState('');
   const [newType, setNewType] = useState<EventType>('other');
   const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
+  const [newEndDate, setNewEndDate] = useState('');
 
   const filteredEvents = filter === 'all' ? events : events.filter(event => event.type === filter);
 
@@ -51,14 +52,16 @@ export default function Timeline() {
       description: newDesc.trim(),
       type: newType,
       date: newDate,
+      endDate: newEndDate && newEndDate !== newDate ? newEndDate : null,
       relatedTaskId: null,
     });
     setNewTitle('');
     setNewDesc('');
     setNewType('other');
     setNewDate(new Date().toISOString().split('T')[0]);
+    setNewEndDate('');
     setShowAdd(false);
-  }, [add, currentProjectId, newDate, newDesc, newTitle, newType]);
+  }, [add, currentProjectId, newDate, newDesc, newEndDate, newTitle, newType]);
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mx-auto max-w-4xl">
@@ -129,14 +132,26 @@ export default function Timeline() {
                   className="w-full resize-none rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 transition-colors focus:border-indigo-500/50 focus:outline-none"
                 />
               </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-400">日期</label>
-                <input
-                  type="date"
-                  value={newDate}
-                  onChange={event => setNewDate(event.target.value)}
-                  className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white transition-colors focus:border-indigo-500/50 focus:outline-none"
-                />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-400">开始日期</label>
+                  <input
+                    type="date"
+                    value={newDate}
+                    onChange={event => setNewDate(event.target.value)}
+                    className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white transition-colors focus:border-indigo-500/50 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-400">结束日期</label>
+                  <input
+                    type="date"
+                    value={newEndDate}
+                    min={newDate}
+                    onChange={event => setNewEndDate(event.target.value)}
+                    className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white transition-colors focus:border-indigo-500/50 focus:outline-none"
+                  />
+                </div>
               </div>
             </div>
             <div className="mt-4 flex justify-end gap-3">
@@ -228,6 +243,11 @@ export default function Timeline() {
                             {event.description && <p className="mt-1 text-xs leading-relaxed text-slate-500">{event.description}</p>}
                             <div className="mt-2 flex items-center gap-2">
                               <p className="text-[10px] text-slate-600">{EVENT_TYPE_LABELS[event.type]}</p>
+                              {event.endDate && (
+                                <span className="rounded-full border border-white/[0.06] bg-white/[0.03] px-1.5 py-0.5 text-[10px] text-slate-400">
+                                  {event.date} ~ {event.endDate}
+                                </span>
+                              )}
                               {event.source === 'system' && (
                                 <span className="rounded-full border border-indigo-500/20 bg-indigo-500/10 px-1.5 py-0.5 text-[10px] text-indigo-400">
                                   自动记录

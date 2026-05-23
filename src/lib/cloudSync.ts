@@ -63,7 +63,18 @@ const tableMap = {
   milestones: db.milestones,
   timelineEvents: db.timelineEvents,
   diaryEntries: db.diaryEntries,
+  sprints: db.sprints,
+  comments: db.comments,
 };
+
+const MEMBER_ONLINE_WINDOW_MS = 2 * 60 * 1000;
+
+export function isMemberOnline(lastSeenAt?: string | null, now = Date.now()) {
+  if (!lastSeenAt) return false;
+  const value = new Date(lastSeenAt).getTime();
+  if (Number.isNaN(value)) return false;
+  return now - value <= MEMBER_ONLINE_WINDOW_MS;
+}
 
 function getSupabaseConfig() {
   return {
@@ -230,7 +241,7 @@ function rowToMember(row: RemoteMemberRow, projectId: number): Omit<TeamMember, 
     email: row.email,
     displayName: row.display_name,
     joinedAt: row.joined_at,
-    online: false,
+    online: isMemberOnline(row.last_seen_at),
     lastSeenAt: row.last_seen_at ?? null,
   };
 }
@@ -379,12 +390,19 @@ export async function importSharedProjects(session: CloudSession): Promise<numbe
     if (deletedRemoteProjectIds.has(local.remoteProjectId)) continue;
     // 远端已删除 → 清理本地所有关联数据
     await withoutSyncTracking(async () => {
+      const tasks = await db.tasks.where('projectId').equals(local.id!).toArray();
+      const taskIds = tasks.map(task => task.id).filter((id): id is number => typeof id === 'number');
       await db.tasks.where('projectId').equals(local.id!).delete();
       await db.milestones.where('projectId').equals(local.id!).delete();
       await db.timelineEvents.where('projectId').equals(local.id!).delete();
       await db.diaryEntries.where('projectId').equals(local.id!).delete();
       await db.teamMembers.where('projectId').equals(local.id!).delete();
       await db.syncChanges.where('projectId').equals(local.id!).delete();
+      await db.collaborationEvents.where('projectId').equals(local.id!).delete();
+      await db.notifications.where('projectId').equals(local.id!).delete();
+      await db.inviteLinks.where('projectId').equals(local.id!).delete();
+      await db.sprints.where('projectId').equals(local.id!).delete();
+      if (taskIds.length > 0) await db.comments.where('taskId').anyOf(taskIds).delete();
       await db.projects.delete(local.id!);
     });
   }
@@ -467,18 +485,34 @@ async function pushChange(change: SyncChange, session: CloudSession): Promise<bo
 }
 
 async function recordRemoteActivity(record: RemoteRecord, payload: Record<string, unknown>) {
-  if (record.client_id === getClientId() || record.deleted_at || record.entity_type !== 'tasks') return;
+  if (record.client_id === getClientId() || record.deleted_at) return;
+  const projectId = typeof payload.projectId === 'number' ? payload.projectId : record.project_id ?? 0;
+  if (record.entity_type === 'comments') {
+    await recordCollaborationEvent({
+      projectId,
+      remoteProjectId: record.remote_project_id,
+      userId: record.user_id,
+      userName: '远程成员',
+      type: 'comment_added',
+      targetType: 'comments',
+      targetId: record.entity_id,
+      title: '新增了任务评论',
+      description: '远程成员新增了一条任务评论。',
+    });
+    return;
+  }
+  if (record.entity_type !== 'tasks') return;
   const status = payload.status;
   const title = typeof payload.title === 'string' ? payload.title : `任务 ${record.entity_id}`;
   if (status !== 'done') return;
   const exists = await db.collaborationEvents
     .where('projectId')
-    .equals(record.project_id ?? 0)
+    .equals(projectId)
     .filter(event => event.type === 'task_completed' && event.targetId === record.entity_id && event.createdAt >= record.updated_at)
     .first();
   if (exists) return;
   await recordCollaborationEvent({
-    projectId: record.project_id ?? 0,
+    projectId,
     remoteProjectId: record.remote_project_id,
     userId: record.user_id,
     userName: '远程成员',
@@ -545,6 +579,7 @@ export async function runCloudSync(session: CloudSession): Promise<SyncState> {
   }
 
   await importSharedProjects(session);
+  await touchMemberPresence(session).catch(() => undefined);
 
   const remoteProjectIds = [...new Set((await db.projects.toArray()).map(project => project.remoteProjectId).filter(Boolean) as string[])];
   const pending = await getSyncablePendingChanges();
@@ -639,12 +674,15 @@ export async function publishProjectToCloud(session: CloudSession, project: Proj
     await pushEntitySnapshot(session, remoteId, 'projects', updatedProject.id, updatedProject.id, updatedProject as unknown as Record<string, unknown>, updatedProject.updatedAt);
   }
 
-  const [tasks, milestones, timelineEvents, diaryEntries] = await Promise.all([
+  const [tasks, milestones, timelineEvents, diaryEntries, sprints] = await Promise.all([
     db.tasks.where('projectId').equals(project.id!).toArray(),
     db.milestones.where('projectId').equals(project.id!).toArray(),
     db.timelineEvents.where('projectId').equals(project.id!).toArray(),
     db.diaryEntries.where('projectId').equals(project.id!).toArray(),
+    db.sprints.where('projectId').equals(project.id!).toArray(),
   ]);
+  const taskIds = tasks.map(task => task.id).filter((id): id is number => typeof id === 'number');
+  const comments = taskIds.length > 0 ? await db.comments.where('taskId').anyOf(taskIds).toArray() : [];
   for (const task of tasks) {
     if (task.id) await pushEntitySnapshot(session, remoteId, 'tasks', task.id, task.projectId, task as unknown as Record<string, unknown>, task.updatedAt);
   }
@@ -656,6 +694,12 @@ export async function publishProjectToCloud(session: CloudSession, project: Proj
   }
   for (const entry of diaryEntries) {
     if (entry.id) await pushEntitySnapshot(session, remoteId, 'diaryEntries', entry.id, entry.projectId, entry as unknown as Record<string, unknown>, entry.updatedAt);
+  }
+  for (const sprint of sprints) {
+    if (sprint.id) await pushEntitySnapshot(session, remoteId, 'sprints', sprint.id, sprint.projectId, sprint as unknown as Record<string, unknown>, sprint.updatedAt);
+  }
+  for (const comment of comments) {
+    if (comment.id) await pushEntitySnapshot(session, remoteId, 'comments', comment.id, project.id!, comment as unknown as Record<string, unknown>, comment.createdAt);
   }
 
   const existing = await db.teamMembers.where({ projectId: project.id!, userId: authUserId }).first();
@@ -700,6 +744,43 @@ export async function upsertRemoteMember(session: CloudSession, remoteProjectId:
       last_seen_at: member.lastSeenAt,
     }),
   }, session.accessToken);
+}
+
+export async function touchMemberPresence(session: CloudSession, projectId?: number | null): Promise<number> {
+  if (!navigator.onLine) return 0;
+  const authUserId = getSessionAuthUserId(session);
+  const now = new Date().toISOString();
+  const projects = projectId
+    ? (await Promise.all([db.projects.get(projectId)])).filter(Boolean) as Project[]
+    : await db.projects.filter(project => Boolean(project.remoteProjectId)).toArray();
+
+  let touched = 0;
+  for (const project of projects) {
+    if (!project.id || !project.remoteProjectId) continue;
+    const existing = await db.teamMembers.where({ projectId: project.id, userId: authUserId }).first();
+    if (existing?.id) {
+      await db.teamMembers.update(existing.id, {
+        email: session.user.email,
+        displayName: session.user.displayName,
+        online: true,
+        lastSeenAt: now,
+      });
+    }
+    try {
+      await supabaseFetch('/rest/v1/rpc/devtrack_touch_member_presence', {
+        method: 'POST',
+        body: JSON.stringify({
+          p_project_id: project.remoteProjectId,
+          p_email: session.user.email,
+          p_display_name: session.user.displayName,
+        }),
+      }, session.accessToken);
+      touched += 1;
+    } catch {
+      // Presence is best-effort and should never block normal project syncing.
+    }
+  }
+  return touched;
 }
 
 export async function fetchRemoteMembers(session: CloudSession, remoteProjectId: string) {

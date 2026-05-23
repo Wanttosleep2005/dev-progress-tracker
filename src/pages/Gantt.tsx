@@ -203,7 +203,7 @@ export default function Gantt() {
 
         <div className="mt-4 flex flex-wrap gap-3 text-xs text-slate-500">
           <span className="flex items-center gap-1"><Filter size={12} />状态/成员筛选已启用</span>
-          <span>依赖关系使用任务上的 dependencyIds 字段绘制标记；后续可扩展为完整箭头线。</span>
+          <span>依赖关系使用任务上的 dependsOn 字段绘制标记；后续可扩展为完整箭头线。</span>
         </div>
       </div>
     </motion.div>

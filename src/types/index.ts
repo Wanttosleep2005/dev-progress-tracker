@@ -8,7 +8,7 @@ export type ViewMode = 'kanban' | 'list';
 export type TaskSource = 'board' | 'daily';
 export type TeamRole = 'owner' | 'editor' | 'viewer';
 export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'conflict';
-export type SyncEntityType = 'projects' | 'tasks' | 'milestones' | 'timelineEvents' | 'diaryEntries';
+export type SyncEntityType = 'projects' | 'tasks' | 'milestones' | 'timelineEvents' | 'diaryEntries' | 'sprints' | 'comments';
 export type SyncOperation = 'upsert' | 'delete';
 export type CollaborationEventType =
   | 'project_shared'
@@ -62,7 +62,6 @@ export interface Task {
   isTodayTask: boolean;
   publishedAt: string | null;
   assigneeId?: string | null;
-  dependencyIds?: number[];
   dependsOn?: number[];
   subtasks?: Subtask[];
   trackedMinutes?: number;
@@ -115,6 +114,7 @@ export interface TimelineEvent {
   description: string;
   type: EventType;
   date: string;
+  endDate?: string | null;
   relatedTaskId: number | null;
   createdAt: string;
   source?: 'manual' | 'system';
@@ -298,6 +298,8 @@ export interface AICommandAction {
   plannedStartAt: string;
   plannedEndAt: string;
   relatedTaskId: string;
+  endDate?: string;
+  milestoneId?: number | string;
   /** v0.6.0: 子任务清单 */
   subtasks?: { id: string; title: string; done: boolean }[];
   /** v0.6.0: 实际追踪耗时（分钟） */

@@ -31,3 +31,6 @@ dist-ssr
 
 # Changelog (local only)
 CHANGELOG.md
+
+# Project backups
+project-backups/

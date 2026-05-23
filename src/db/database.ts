@@ -85,14 +85,20 @@ class DevTrackDatabase extends Dexie {
           if (!('plannedStartAt' in task)) patch.plannedStartAt = null;
           if (!('plannedEndAt' in task)) patch.plannedEndAt = null;
           if (!('assigneeId' in task)) patch.assigneeId = null;
-          if (!('dependencyIds' in task)) patch.dependencyIds = [];
-          if (!('dependsOn' in task)) patch.dependsOn = task.dependencyIds ?? [];
+          if (!('dependsOn' in task)) patch.dependsOn = (task as Task & { dependencyIds?: number[] }).dependencyIds ?? [];
           if (!('createdBy' in task)) patch.createdBy = null;
           if (!('updatedBy' in task)) patch.updatedBy = null;
           if (!('remoteId' in task)) patch.remoteId = null;
           if (!('syncUpdatedAt' in task)) patch.syncUpdatedAt = task.updatedAt ?? null;
           if (Object.keys(patch).length > 0) {
             await tx.table('tasks').update(task.id, patch);
+          }
+        }
+
+        const events = await tx.table('timelineEvents').toArray();
+        for (const event of events) {
+          if (!('endDate' in event)) {
+            await tx.table('timelineEvents').update(event.id, { endDate: null });
           }
         }
 
@@ -204,12 +210,41 @@ export async function updateProject(id: number, changes: Partial<Project>): Prom
 
 export async function deleteProject(id: number): Promise<void> {
   const before = await db.projects.get(id);
-  await queueSyncChange('projects', id, id, 'delete', { id, remoteProjectId: before?.remoteProjectId ?? null }, before?.updatedAt ?? null, before?.remoteProjectId ?? null);
-  await db.projects.delete(id);
-  await db.tasks.where('projectId').equals(id).delete();
-  await db.milestones.where('projectId').equals(id).delete();
-  await db.timelineEvents.where('projectId').equals(id).delete();
-  await db.diaryEntries.where('projectId').equals(id).delete();
+  const remoteProjectId = before?.remoteProjectId ?? null;
+  await db.transaction(
+    'rw',
+    [
+      db.projects,
+      db.tasks,
+      db.milestones,
+      db.timelineEvents,
+      db.diaryEntries,
+      db.teamMembers,
+      db.syncChanges,
+      db.collaborationEvents,
+      db.notifications,
+      db.inviteLinks,
+      db.sprints,
+      db.comments,
+    ],
+    async () => {
+      const tasks = await db.tasks.where('projectId').equals(id).toArray();
+      const taskIds = tasks.map(task => task.id).filter((taskId): taskId is number => typeof taskId === 'number');
+      await db.projects.delete(id);
+      await db.tasks.where('projectId').equals(id).delete();
+      await db.milestones.where('projectId').equals(id).delete();
+      await db.timelineEvents.where('projectId').equals(id).delete();
+      await db.diaryEntries.where('projectId').equals(id).delete();
+      await db.teamMembers.where('projectId').equals(id).delete();
+      await db.syncChanges.where('projectId').equals(id).delete();
+      await db.collaborationEvents.where('projectId').equals(id).delete();
+      await db.notifications.where('projectId').equals(id).delete();
+      await db.inviteLinks.where('projectId').equals(id).delete();
+      await db.sprints.where('projectId').equals(id).delete();
+      if (taskIds.length > 0) await db.comments.where('taskId').anyOf(taskIds).delete();
+    }
+  );
+  await queueSyncChange('projects', id, id, 'delete', { id, remoteProjectId }, before?.updatedAt ?? null, remoteProjectId);
 }
 
 export async function cloneProject(id: number, newName: string): Promise<number> {
@@ -270,8 +305,13 @@ export async function updateTask(id: number, changes: Partial<Task>): Promise<nu
 
 export async function deleteTask(id: number): Promise<void> {
   const before = await db.tasks.get(id);
+  const comments = await db.comments.where('taskId').equals(id).toArray();
   await db.tasks.delete(id);
+  await db.comments.where('taskId').equals(id).delete();
   await queueSyncChange('tasks', id, before?.projectId ?? null, 'delete', { id }, before?.updatedAt ?? null);
+  for (const comment of comments) {
+    if (comment.id) await queueSyncChange('comments', comment.id, before?.projectId ?? null, 'delete', { id: comment.id }, comment.createdAt);
+  }
 }
 
 export async function getMilestonesByProject(projectId: number): Promise<Milestone[]> {
@@ -306,7 +346,7 @@ export async function getEventsByProject(projectId: number): Promise<TimelineEve
 }
 
 export async function addEvent(event: Omit<TimelineEvent, 'id' | 'createdAt'>): Promise<number> {
-  const record = { ...event, createdAt: new Date().toISOString() };
+  const record = { ...event, endDate: event.endDate ?? null, createdAt: new Date().toISOString() };
   const id = await db.timelineEvents.add(record);
   await queueSyncChange('timelineEvents', id, event.projectId, 'upsert', { ...record, id }, null);
   return id;
@@ -388,7 +428,7 @@ export async function seedAchievements(achievements: Omit<Achievement, 'id' | 'u
 }
 
 export async function getUnreadNotificationCount(): Promise<number> {
-  return db.notifications.where('read').equals(false).count();
+  return db.notifications.filter(notification => !notification.read).count();
 }
 
 export async function getNotifications(limit = 50): Promise<Notification[]> {
@@ -405,7 +445,7 @@ export async function markNotificationRead(id: number): Promise<void> {
 }
 
 export async function markAllNotificationsRead(): Promise<void> {
-  await db.notifications.where('read').equals(false).modify({ read: true });
+  await db.notifications.filter(notification => !notification.read).modify({ read: true });
 }
 
 export async function clearNotifications(): Promise<void> {
@@ -419,16 +459,25 @@ export async function getSprintsByProject(projectId: number): Promise<Sprint[]> 
 
 export async function addSprint(sprint: Omit<Sprint, 'id' | 'createdAt' | 'updatedAt'>): Promise<number> {
   const now = new Date().toISOString();
-  return db.sprints.add({ ...sprint, createdAt: now, updatedAt: now });
+  const record = { ...sprint, createdAt: now, updatedAt: now };
+  const id = await db.sprints.add(record);
+  await queueSyncChange('sprints', id, sprint.projectId, 'upsert', { ...record, id }, null);
+  return id;
 }
 
 export async function updateSprint(id: number, changes: Partial<Sprint>): Promise<number> {
-  return db.sprints.update(id, { ...changes, updatedAt: new Date().toISOString() });
+  const before = await db.sprints.get(id);
+  const result = await db.sprints.update(id, { ...changes, updatedAt: new Date().toISOString() });
+  const after = await db.sprints.get(id);
+  if (after) await queueSyncChange('sprints', id, after.projectId, 'upsert', after as unknown as Record<string, unknown>, before?.updatedAt ?? null);
+  return result;
 }
 
 export async function deleteSprint(id: number): Promise<void> {
+  const before = await db.sprints.get(id);
   await db.tasks.where('sprintId').equals(id).modify({ sprintId: null });
   await db.sprints.delete(id);
+  await queueSyncChange('sprints', id, before?.projectId ?? null, 'delete', { id }, before?.updatedAt ?? null);
 }
 
 // Comment CRUD
@@ -437,9 +486,16 @@ export async function getCommentsByTask(taskId: number): Promise<TaskComment[]> 
 }
 
 export async function addComment(comment: Omit<TaskComment, 'id' | 'createdAt'>): Promise<number> {
-  return db.comments.add({ ...comment, createdAt: new Date().toISOString() });
+  const record = { ...comment, createdAt: new Date().toISOString() };
+  const id = await db.comments.add(record);
+  const task = await db.tasks.get(comment.taskId);
+  await queueSyncChange('comments', id, task?.projectId ?? null, 'upsert', { ...record, id }, null);
+  return id;
 }
 
 export async function deleteComment(id: number): Promise<void> {
+  const before = await db.comments.get(id);
+  const task = before ? await db.tasks.get(before.taskId) : null;
   await db.comments.delete(id);
+  await queueSyncChange('comments', id, task?.projectId ?? null, 'delete', { id }, before?.createdAt ?? null);
 }

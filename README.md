@@ -5,10 +5,18 @@
 [![React](https://img.shields.io/badge/React-19-blue?logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6-blue?logo=typescript)](https://www.typescriptlang.org)
 [![Vite](https://img.shields.io/badge/Vite-8-purple?logo=vite)](https://vite.dev)
-[![Version](https://img.shields.io/badge/version-0.7.0-green)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.9.0-green)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ## 功能特性
+
+### v0.9.0 协作闭环版
+- **共享项目发布流程收口** - 发布项目通过 Supabase RPC 自动写入项目与 Owner 成员关系，规避前端直写触发的 RLS 首行插入问题
+- **同步实体补全** - 任务、里程碑、时间线、日记、Sprint、评论统一进入同步队列，团队成员操作后可被其他成员拉取
+- **删除闭环** - 删除项目时同步清理任务、里程碑、时间线、日记、成员、活动流、通知、邀请、Sprint、评论和同步队列，降低“删了又回来”的概率
+- **任务依赖收敛** - 新数据统一使用 `dependsOn` 字段，旧 `dependencyIds` 仅作为兼容读取来源
+- **AI 指令更稳** - DeepSeek 默认模型改为 `deepseek-chat`，增加本地 action 校验、里程碑 ID 语义字段和多日时间线事件 `endDate`
+- **多日时间线事件** - Timeline 创建区支持开始/结束日期，Calendar 和 Timeline 对多日事件的含义保持一致
 
 ### 核心功能
 - **项目模板** - 4 套预置模板（Web 全栈/移动端/开源/学习），一键创建任务和里程碑

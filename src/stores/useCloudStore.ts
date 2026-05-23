@@ -9,6 +9,7 @@ import {
   fetchRemoteMembers,
   getCloudPendingChangeCount,
   importSharedProjects,
+  isMemberOnline,
   joinRemoteProject,
   loadCloudSession,
   publishProjectToCloud,
@@ -17,6 +18,7 @@ import {
   saveCloudSession,
   signInWithEmail,
   signUpWithEmail,
+  touchMemberPresence,
   updateRemoteMemberRole,
   upsertRemoteMember,
   type CloudSession,
@@ -39,6 +41,7 @@ interface CloudStore {
   signUp: (email: string, password: string, displayName: string) => Promise<void>;
   signOut: () => void;
   syncNow: () => Promise<void>;
+  touchPresence: () => Promise<void>;
   loadTeam: (projectId: number) => Promise<void>;
   inviteByEmail: (projectId: number, email: string, role: TeamMember['role']) => Promise<void>;
   updateMemberRole: (memberId: number, role: TeamMember['role']) => Promise<void>;
@@ -73,6 +76,7 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
     if (session) {
       try {
         await importSharedProjects(session);
+        await touchMemberPresence(session);
         await useAppStore.getState().loadProjects();
       } catch {
         // Keep local startup available when the network is unavailable.
@@ -131,6 +135,8 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
     try {
       const syncState = await runCloudSync(session);
       set({ syncState });
+      const currentProjectId = useAppStore.getState().currentProjectId;
+      if (currentProjectId) await get().loadTeam(currentProjectId);
     } catch (error) {
       const pendingChanges = await getCloudPendingChangeCount();
       set({
@@ -144,22 +150,38 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
     }
   },
 
+  touchPresence: async () => {
+    const session = get().session;
+    if (!session) return;
+    await touchMemberPresence(session, useAppStore.getState().currentProjectId).catch(() => undefined);
+    const currentProjectId = useAppStore.getState().currentProjectId;
+    if (currentProjectId) await get().loadTeam(currentProjectId);
+  },
+
   loadTeam: async (projectId) => {
     const project = await db.projects.get(projectId);
     const session = get().session;
     if (session && project?.remoteProjectId) {
       try {
+        await touchMemberPresence(session, projectId);
         const remoteMembers = await fetchRemoteMembers(session, project.remoteProjectId);
         const remoteUserIds = new Set(remoteMembers.map(m => m.user_id));
         for (const member of remoteMembers) {
           const existing = await db.teamMembers.where({ projectId, userId: member.user_id }).first();
+          const remoteLastSeenAt = member.last_seen_at ?? null;
+          const isCurrentUser = member.user_id === session.user.id || member.email === session.user.email;
+          const localIsNewer = existing?.lastSeenAt && remoteLastSeenAt
+            ? new Date(existing.lastSeenAt).getTime() > new Date(remoteLastSeenAt).getTime()
+            : Boolean(existing?.lastSeenAt && !remoteLastSeenAt);
+          const lastSeenAt = isCurrentUser && localIsNewer ? existing?.lastSeenAt ?? remoteLastSeenAt : remoteLastSeenAt;
           if (existing?.id) {
             await db.teamMembers.update(existing.id, {
               role: member.role,
               email: member.email,
               displayName: member.display_name,
               joinedAt: member.joined_at,
-              lastSeenAt: member.last_seen_at ?? null,
+              online: isMemberOnline(lastSeenAt),
+              lastSeenAt,
             });
           } else {
             await addLocalTeamMember({
@@ -168,8 +190,8 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
               role: member.role,
               email: member.email,
               displayName: member.display_name,
-              online: false,
-              lastSeenAt: member.last_seen_at ?? null,
+              online: isMemberOnline(lastSeenAt),
+              lastSeenAt,
             });
           }
         }
@@ -188,7 +210,10 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
       db.teamMembers.where('projectId').equals(projectId).toArray(),
       db.collaborationEvents.where('projectId').equals(projectId).reverse().sortBy('createdAt'),
     ]);
-    set({ members, events: events.slice(0, 40) });
+    set({
+      members: members.map(member => ({ ...member, online: isMemberOnline(member.lastSeenAt) })),
+      events: events.slice(0, 40),
+    });
   },
 
   inviteByEmail: async (projectId, email, role) => {

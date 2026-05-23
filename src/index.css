@@ -211,3 +211,24 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 .hljs-punctuation { color: #c9d1d9; }
 .hljs-variable { color: #ffa657; }
 .hljs-operator { color: #ff7b72; }
+
+/* ReactFlow 暗色主题控件 */
+.react-flow__controls-button {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
+  fill: rgba(255, 255, 255, 0.5) !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  box-shadow: none !important;
+}
+.react-flow__controls-button:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  fill: rgba(255, 255, 255, 0.8) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+.react-flow__controls-button svg {
+  fill: rgba(255, 255, 255, 0.5) !important;
+}
+.react-flow__controls-button:hover svg {
+  fill: rgba(255, 255, 255, 0.8) !important;
+}

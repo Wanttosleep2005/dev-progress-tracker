@@ -4,6 +4,7 @@ import { ACHIEVEMENTS } from '../types';
 import * as db from '../db/database';
 import { recordProjectCreated, recordProjectDeadlineChanged } from '../lib/systemEvents';
 import { deleteRemoteProjectFromCloud, loadCloudSession } from '../lib/cloudSync';
+import { useToast } from './useToast';
 
 interface AppStore {
   currentProjectId: number | null;
@@ -66,6 +67,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
   deleteProject: async (id) => {
     const existing = await db.getProject(id);
     const session = loadCloudSession();
+    if (existing?.remoteProjectId && session?.user) {
+      const member = await db.db.teamMembers
+        .where({ projectId: id, userId: session.user.id })
+        .first();
+      if (member?.role !== 'owner') {
+        useToast.getState().add('只有项目所有者可以删除共享项目。', 'warning');
+        return;
+      }
+    }
     if (session && existing?.remoteProjectId) {
       try {
         await deleteRemoteProjectFromCloud(session, existing.remoteProjectId);

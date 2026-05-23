@@ -58,6 +58,7 @@ export default function QuickLogModal({ open, type, onClose }: Props) {
       milestoneId: null,
       estimatedMinutes: estimatedMinutes ? parseInt(estimatedMinutes) || null : null,
       url: '',
+      recurrence: 'none',
       source: 'board',
       remindAt: null,
       isTodayTask: false,

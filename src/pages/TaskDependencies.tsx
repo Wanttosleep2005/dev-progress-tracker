@@ -270,7 +270,7 @@ export default function TaskDependencies() {
     const target = tasks.find(task => task.id === targetId);
     if (!target?.id) return;
     const normalized = normalizeDependencyIds(nextDependencyIds, target.id);
-    await update(target.id, { dependsOn: normalized, dependencyIds: normalized });
+    await update(target.id, { dependsOn: normalized });
   }, [tasks, update]);
 
   const onConnect = useCallback<OnConnect>(async (connection: Connection) => {

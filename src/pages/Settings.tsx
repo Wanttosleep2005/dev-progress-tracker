@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Bell, Database, Download, Eye, FileText, Info, Keyboard, Network, Settings, Sparkles, Trash2, Upload } from 'lucide-react';
+import { Bell, Database, Download, Eye, FileText, FolderOpen, Info, Keyboard, Network, Settings, Sparkles, Trash2, Upload } from 'lucide-react';
 import { db } from '../db/database';
 import { buildWeeklyReport } from '../lib/reporting';
 import { useAppStore } from '../stores/useAppStore';
@@ -12,6 +12,7 @@ import { usePreferences } from '../stores/usePreferences';
 import { useSidebarStore } from '../stores/useSidebarStore';
 import { useNotificationStore } from '../stores/useNotificationStore';
 import { getCustomBaseUrl, setCustomBaseUrl } from '../lib/cloudSync';
+import { getBackupDirectory, getBackupDirectoryLabel, selectBackupDirectory, setBackupDirectory } from '../lib/backup';
 import TimePicker from '../components/ui/TimePicker';
 import type { TaskPriority, TaskStatus } from '../types';
 
@@ -56,7 +57,7 @@ export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const { animationsEnabled, setAnimationsEnabled } = usePreferences();
   const { settings: notificationSettings, requestPermission, updateSettings } = useNotificationStore();
-  const { items: sidebarItems, init: initSidebar, toggle: toggleSidebarItem, hideAll, showAll } = useSidebarStore();
+  const { items: sidebarItems, init: initSidebar, toggle: toggleSidebarItem, hideAll, showAll, applyRecommended } = useSidebarStore();
   const [message, setMessage] = useState('');
   const [version, setVersion] = useState('0.0.0');
   const [shortcuts, setShortcuts] = useState(() => {
@@ -71,6 +72,8 @@ export default function SettingsPage() {
     } catch { return {}; }
   });
   const [baseUrl, setBaseUrl] = useState(() => getCustomBaseUrl());
+  const [backupDir, setBackupDir] = useState(() => getBackupDirectory() || 'G:\\developspace\\dev-progress-tracker\\project-backups\\data');
+  const [backupDirLabel, setBackupDirLabel] = useState(() => getBackupDirectoryLabel());
   const [detectedIps, setDetectedIps] = useState<string[]>([]);
 
   useEffect(() => {
@@ -201,7 +204,6 @@ export default function SettingsPage() {
               publishedAt: null,
               subtasks: [],
               trackedMinutes: 0,
-              dependencyIds: [],
               dependsOn: [],
             });
             imported++;
@@ -396,6 +398,7 @@ export default function SettingsPage() {
         </h3>
         <p className="mb-4 text-xs text-slate-500">勾选你想在左侧导航栏显示的项目。</p>
         <div className="mb-3 flex gap-2">
+          <button onClick={applyRecommended} className="rounded-lg border border-sky-500/20 bg-sky-500/10 px-3 py-1.5 text-[11px] text-sky-200 hover:bg-sky-500/20">使用推荐显示</button>
           <button onClick={hideAll} className="rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/[0.06]">全部隐藏</button>
           <button onClick={showAll} className="rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/[0.06]">全部启用</button>
         </div>
@@ -411,7 +414,10 @@ export default function SettingsPage() {
               }`}
             >
               <div className={`h-2 w-2 rounded-full ${item.visible ? 'bg-sky-400' : 'bg-slate-600'}`} />
-              {item.label}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{item.label}</span>
+                <span className="mt-0.5 block truncate text-[10px] opacity-60">权重 {item.weight} · {item.reason}</span>
+              </span>
             </button>
           ))}
         </div>
@@ -582,6 +588,45 @@ export default function SettingsPage() {
         <p className="mb-4 text-xs text-slate-500">
           所有数据都存储在浏览器本地 IndexedDB 中，支持备份、恢复和自动周报导出。
         </p>
+        <div className="mb-4 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+          <label className="mb-2 block text-xs text-slate-500">备份文件存放目录</label>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <input
+              value={backupDir}
+              onChange={event => setBackupDir(event.target.value)}
+              placeholder="例如：G:\developspace\dev-progress-tracker\project-backups\data"
+              className="flex-1 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-cyan-500/50 focus:outline-none"
+            />
+            <button
+              onClick={async () => {
+                try {
+                  const label = await selectBackupDirectory();
+                  setBackupDirLabel(label);
+                  setMessage('已选择备份文件夹，后续可直接保存备份文件');
+                } catch (error) {
+                  setMessage(error instanceof Error ? error.message : '选择文件夹失败');
+                }
+              }}
+              className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-300 hover:bg-emerald-500/20"
+            >
+              <FolderOpen size={14} />
+              选择文件夹
+            </button>
+            <button
+              onClick={() => {
+                setBackupDirectory(backupDir);
+                setBackupDirLabel(getBackupDirectoryLabel());
+                setMessage('备份文件存放目录已保存');
+              }}
+              className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-300 hover:bg-cyan-500/20"
+            >
+              保存目录
+            </button>
+          </div>
+          <p className="mt-2 text-[10px] leading-5 text-slate-600">
+            当前选择：{backupDirLabel || '尚未选择'}。优先使用“选择文件夹”的浏览器授权目录；如果浏览器不支持，再使用手动填写的本地路径。
+          </p>
+        </div>
         <div className="flex flex-wrap gap-3">
           <button
             onClick={handleExport}

@@ -3,9 +3,11 @@ import { Bot, CheckCircle2, Loader2, Play, Settings2, Sparkles, Wand2, X } from 
 import { useAICommandStore } from '../stores/useAICommandStore';
 import { useAppStore } from '../stores/useAppStore';
 import { PRIORITY_LABELS, STATUS_LABELS } from '../types';
-import type { AICommandSettings } from '../types';
+import type { AIActionType, AICommandSettings } from '../types';
 
-const actionLabels = {
+const actionLabels: Record<AIActionType, string> = {
+  update_task: '更新任务',
+  update_milestone: '更新里程碑',
   create_task: '创建任务',
   create_today_task: '发布今日任务',
   create_milestone: '创建里程碑',

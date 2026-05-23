@@ -110,7 +110,6 @@ export default function TaskBoard() {
       remindAt: null,
       isTodayTask: false,
       publishedAt: null,
-      dependencyIds: [],
       dependsOn: [],
     });
     resetCreateForm();
@@ -220,7 +219,7 @@ export default function TaskBoard() {
                 else next.add(task.id!);
                 return next;
               })
-            : (setDependencyQuery(''), setEditingTask({ ...task, dependsOn: getTaskDependencyIds(task), dependencyIds: getTaskDependencyIds(task) }))
+            : (setDependencyQuery(''), setEditingTask({ ...task, dependsOn: getTaskDependencyIds(task) }))
         }
         whileHover={batchMode ? undefined : { y: -2 }}
         className={`group relative rounded-[24px] border bg-[#0e1524] p-4 transition-all ${canEditProject ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${
@@ -700,7 +699,7 @@ export default function TaskBoard() {
                                 const nextIds = event.target.checked
                                   ? normalizeDependencyIds([...ids, task.id!], editingTask.id)
                                   : ids.filter(id => id !== task.id);
-                                setEditingTask({ ...editingTask, dependsOn: nextIds, dependencyIds: nextIds });
+                                setEditingTask({ ...editingTask, dependsOn: nextIds });
                               }}
                               className="h-4 w-4 rounded border-white/[0.12] bg-white/[0.04]"
                             />
@@ -772,7 +771,6 @@ export default function TaskBoard() {
                           url: editingTask.url,
                           recurrence: editingTask.recurrence ?? 'none',
                           dependsOn: getTaskDependencyIds(editingTask),
-                          dependencyIds: getTaskDependencyIds(editingTask),
                           pomodoroGoal: editingTask.pomodoroGoal,
                           subtasks: editingTask.subtasks,
                           trackedMinutes: editingTask.trackedMinutes,

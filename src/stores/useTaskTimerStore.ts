@@ -24,10 +24,9 @@ export const useTaskTimerStore = create<TaskTimerState>((set, get) => ({
     const state = get();
     if (state.taskId === taskId && state.isRunning) return;
     // Stop global focus timer if running
-    try {
-      const { stopFocusTimer } = require('../components/FocusTimer');
-      stopFocusTimer();
-    } catch {}
+    void import('../components/FocusTimer')
+      .then(({ stopFocusTimer }) => stopFocusTimer())
+      .catch(() => undefined);
     // Always reset: if a different task had a timer, it's effectively stopped
     set({
       taskId,

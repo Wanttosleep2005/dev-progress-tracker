@@ -99,7 +99,7 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
             dueDate: action.dueDate || null,
             plannedStartAt: action.plannedStartAt || null,
             plannedEndAt: action.plannedEndAt || action.dueDate || null,
-            milestoneId: action.relatedTaskId ? Number(action.relatedTaskId) || null : null,
+            milestoneId: action.milestoneId ? Number(action.milestoneId) || null : action.relatedTaskId ? Number(action.relatedTaskId) || null : null,
             estimatedMinutes: action.estimatedMinutes || null,
             pomodoroGoal: action.pomodoroGoal ?? null,
             url: action.url || '',
@@ -108,7 +108,6 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
             isTodayTask: action.type === 'create_today_task',
             publishedAt: action.type === 'create_today_task' ? new Date().toISOString() : null,
             assigneeId: null,
-            dependencyIds: depIds,
             dependsOn: depIds,
             subtasks: action.subtasks,
             createdBy: null,
@@ -132,12 +131,12 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
             if (action.pomodoroGoal !== undefined) changes.pomodoroGoal = action.pomodoroGoal;
             if (action.tags?.length) changes.tags = action.tags;
             if (action.subtasks) changes.subtasks = action.subtasks;
-            if (action.dependencyIds?.length) {
+            if (action.dependencyIds !== undefined) {
               const ids = action.dependencyIds.map(Number).filter(Boolean);
-              changes.dependencyIds = ids;
               changes.dependsOn = ids;
             }
-            if (action.relatedTaskId) changes.milestoneId = Number(action.relatedTaskId) || null;
+            if (action.milestoneId !== undefined) changes.milestoneId = Number(action.milestoneId) || null;
+            else if (action.relatedTaskId) changes.milestoneId = Number(action.relatedTaskId) || null;
             await useTaskStore.getState().update(taskId, changes as Partial<import('../types').Task>);
           }
         }
@@ -156,12 +155,11 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
             updatedBy: null,
             remoteId: null,
             syncUpdatedAt: null,
-            recurrence: 'none',
           });
         }
 
         if (action.type === 'update_milestone') {
-          const milestoneId = Number(action.taskId);
+          const milestoneId = Number(action.milestoneId ?? action.taskId);
           if (milestoneId) {
             const changes: Record<string, unknown> = {};
             if (action.milestoneStatus) changes.status = action.milestoneStatus;
@@ -189,6 +187,7 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
             description: action.description,
             type: action.eventType,
             date: action.date || new Date().toISOString().split('T')[0],
+            endDate: action.endDate || null,
             relatedTaskId: Number(action.relatedTaskId) || null,
           });
         }

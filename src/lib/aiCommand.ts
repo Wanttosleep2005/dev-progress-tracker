@@ -7,7 +7,7 @@ export const defaultAICommandSettings: AICommandSettings = {
   provider: 'deepseek_chat',
   apiKey: '',
   endpoint: import.meta.env.DEV ? DEV_PROXY : PROD_ENDPOINT,
-  model: 'deepseek-v4-flash',
+  model: 'deepseek-chat',
   reasoningEffort: 'high',
   autoSyncAfterExecute: true,
 };
@@ -63,7 +63,12 @@ const commandPlanSchema = {
           url: { type: 'string' },
           plannedStartAt: { type: 'string' },
           plannedEndAt: { type: 'string' },
+          endDate: { type: 'string' },
           relatedTaskId: { type: 'string' },
+          milestoneId: { type: ['integer', 'string'] },
+          subtasks: { type: 'array', items: { type: 'object' } },
+          trackedMinutes: { type: 'integer' },
+          sprintId: { type: ['integer', 'string'] },
         },
       },
     },
@@ -152,6 +157,7 @@ function buildPrompt(input: string, context: { project: Project | null; tasks: T
         '- eventType: release | bugfix | milestone | decision | other',
         '- date: 事件日期',
         '- relatedTaskId: 关联任务 ID',
+        '- endDate: 多日事件结束日期 YYYY-MM-DD，单日事件留空',
         '',
         '### configure_pomodoro（番茄钟配置）',
         '- estimatedMinutes: 工作时长（15/20/25/30/45/60）',
@@ -180,10 +186,13 @@ function buildPrompt(input: string, context: { project: Project | null; tasks: T
         '      "url": "",',
         '      "plannedStartAt": "",',
         '      "plannedEndAt": "",',
+        '      "endDate": "",',
         '      "relatedTaskId": "",',
+        '      "milestoneId": "",',
         '      "taskId": null,',
         '      "pomodoroGoal": null,',
-        '      "dependencyIds": []',
+        '      "dependencyIds": [],',
+        '      "subtasks": []',
         '    }',
         '  ]',
         '}',
@@ -234,13 +243,43 @@ function extractText(payload: unknown): string {
   return parts.join('\n');
 }
 
+function assertValidRawPlan(plan: unknown): asserts plan is AICommandPlan {
+  const allowedActions = new Set(commandPlanSchema.properties.actions.items.properties.type.enum);
+  if (!plan || typeof plan !== 'object') {
+    throw new Error('AI 返回内容不是有效的指令计划对象。');
+  }
+  const candidate = plan as Partial<AICommandPlan>;
+  if (!Array.isArray(candidate.actions)) {
+    throw new Error('AI 返回内容缺少 actions 数组。');
+  }
+  candidate.actions.forEach((action, index) => {
+    if (!action || typeof action !== 'object') {
+      throw new Error(`AI 返回的第 ${index + 1} 个动作不是有效对象。`);
+    }
+    if (!allowedActions.has(action.type)) {
+      throw new Error(`AI 返回了不支持的动作类型：${String(action.type)}`);
+    }
+    const needsTitle = ['create_task', 'create_today_task', 'create_milestone', 'create_diary', 'create_event'].includes(action.type);
+    if (needsTitle && !String(action.title || '').trim()) {
+      throw new Error(`AI 返回的第 ${index + 1} 个动作缺少标题，请补充更明确的描述后重试。`);
+    }
+    if (action.type === 'update_task' && action.taskId == null) {
+      throw new Error('AI 试图更新任务，但没有匹配到 taskId。');
+    }
+    if (action.type === 'update_milestone' && action.taskId == null && action.milestoneId == null) {
+      throw new Error('AI 试图更新里程碑，但没有匹配到 milestoneId。');
+    }
+  });
+}
+
 function normalizePlan(plan: AICommandPlan): AICommandPlan {
+  assertValidRawPlan(plan);
   return {
     summary: plan.summary || '已生成执行计划',
     confidence: Math.max(0, Math.min(1, Number(plan.confidence) || 0)),
     actions: (plan.actions || []).map(action => ({
       ...action,
-      title: action.title || '未命名事项',
+      title: action.title || '',
       description: action.description || '',
       dueDate: action.dueDate || '',
       remindAt: action.remindAt || '',
@@ -250,7 +289,9 @@ function normalizePlan(plan: AICommandPlan): AICommandPlan {
       url: action.url || '',
       plannedStartAt: action.plannedStartAt || '',
       plannedEndAt: action.plannedEndAt || '',
+      endDate: action.endDate || '',
       relatedTaskId: action.relatedTaskId || '',
+      milestoneId: action.milestoneId !== null && action.milestoneId !== undefined ? Number(action.milestoneId) || action.milestoneId : undefined,
       milestoneStatus: action.milestoneStatus || 'upcoming',
       taskId: action.taskId !== null && action.taskId !== undefined ? Number(action.taskId) || action.taskId : undefined,
       pomodoroGoal: action.pomodoroGoal !== null && action.pomodoroGoal !== undefined ? Number(action.pomodoroGoal) || null : undefined,
@@ -299,7 +340,8 @@ export async function generateAICommandPlan(
     });
   } catch (err) {
     throw new Error(
-      `网络请求失败，可能是 CORS 跨域或网络问题。${import.meta.env.DEV ? '' : ' 生产环境建议通过后端代理调用 DeepSeek API。'}`
+      `网络请求失败，可能是 CORS 跨域或网络问题。${import.meta.env.DEV ? '' : ' 生产环境建议通过后端代理调用 DeepSeek API。'}`,
+      { cause: err }
     );
   }
 
@@ -317,5 +359,11 @@ export async function generateAICommandPlan(
   const payload = await response.json();
   const text = extractText(payload);
   if (!text) throw new Error('AI 没有返回可解析内容。');
-  return normalizePlan(JSON.parse(text) as AICommandPlan);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    throw new Error('AI 返回的内容不是合法 JSON，请重试或降低一次性指令复杂度。', { cause: err });
+  }
+  return normalizePlan(parsed as AICommandPlan);
 }

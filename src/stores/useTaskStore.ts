@@ -45,7 +45,6 @@ async function generateNextRecurringTask(task: Task) {
     remindAt: null,
     isTodayTask: false,
     publishedAt: null,
-    dependencyIds: task.dependencyIds ?? [],
     dependsOn: task.dependsOn ?? [],
     assigneeId: task.assigneeId,
     createdBy: task.createdBy,
@@ -82,7 +81,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       return 0;
     }
     const now = new Date().toISOString();
-    const normalizedTask = { ...task, dependsOn: task.dependsOn ?? task.dependencyIds ?? [], dependencyIds: task.dependencyIds ?? task.dependsOn ?? [] };
+    const normalizedTask = { ...task, dependsOn: task.dependsOn ?? [] };
     const id = await db.addTask(normalizedTask);
     await recordTaskCreated({ ...normalizedTask, id, createdAt: now, updatedAt: now });
     const user = useCloudStore.getState().user;
@@ -125,11 +124,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       }
     }
 
-    const normalizedChanges = changes.dependsOn
-      ? { ...changes, dependencyIds: changes.dependsOn }
-      : changes.dependencyIds
-        ? { ...changes, dependsOn: changes.dependencyIds }
-        : changes;
+    const normalizedChanges = changes.dependsOn ? { ...changes, dependsOn: changes.dependsOn } : changes;
     const prevTask = { ...task };
     set(state => ({ tasks: state.tasks.map(t => t.id === id ? { ...t, ...normalizedChanges } : t) }));
 

@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { Sprint } from '../types';
 import { addSprint, db, deleteSprint, getSprintsByProject, updateSprint } from '../db/database';
+import { useCloudStore } from './useCloudStore';
+import { useToast } from './useToast';
 
 interface SprintStore {
   sprints: Sprint[];
@@ -22,12 +24,21 @@ export const useSprintStore = create<SprintStore>((set) => ({
   },
 
   add: async (sprint) => {
+    if (!useCloudStore.getState().canEdit(sprint.projectId)) {
+      useToast.getState().add('你没有编辑该共享项目冲刺的权限。', 'warning');
+      return;
+    }
     await addSprint(sprint);
     const sprints = await getSprintsByProject(sprint.projectId);
     set({ sprints });
   },
 
   update: async (id, changes) => {
+    const sprint = await db.sprints.get(id);
+    if (!useCloudStore.getState().canEdit(sprint?.projectId ?? null)) {
+      useToast.getState().add('你没有编辑该共享项目冲刺的权限。', 'warning');
+      return;
+    }
     await updateSprint(id, changes);
     set(state => ({
       sprints: state.sprints.map(s => (s.id === id ? { ...s, ...changes } : s)),
@@ -36,6 +47,10 @@ export const useSprintStore = create<SprintStore>((set) => ({
 
   remove: async (id) => {
     const sprint = await db.sprints.get(id);
+    if (!useCloudStore.getState().canEdit(sprint?.projectId ?? null)) {
+      useToast.getState().add('你没有删除该共享项目冲刺的权限。', 'warning');
+      return;
+    }
     await deleteSprint(id);
     if (sprint) {
       const sprints = await getSprintsByProject(sprint.projectId);

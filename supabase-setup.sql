@@ -13,6 +13,8 @@ drop function if exists public.devtrack_touch_updated_at() cascade;
 drop function if exists public.devtrack_is_project_member(text, text[]) cascade;
 drop function if exists public.devtrack_can_edit_project(text) cascade;
 drop function if exists public.devtrack_is_project_owner(text) cascade;
+drop function if exists public.devtrack_publish_project(text, text, jsonb, timestamptz, text, text) cascade;
+drop function if exists public.devtrack_touch_member_presence(text, text, text) cascade;
 
 -- Create projects table
 create table public.devtrack_projects (
@@ -41,7 +43,7 @@ create table public.devtrack_sync_records (
   id text primary key,
   user_id text not null,
   remote_project_id text not null references public.devtrack_projects(id) on delete cascade,
-  entity_type text not null check (entity_type in ('projects', 'tasks', 'milestones', 'timelineEvents', 'diaryEntries')),
+  entity_type text not null check (entity_type in ('projects', 'tasks', 'milestones', 'timelineEvents', 'diaryEntries', 'sprints', 'comments')),
   entity_id integer not null,
   project_id integer,
   payload jsonb not null default '{}'::jsonb,
@@ -78,6 +80,79 @@ for each row
 execute function public.devtrack_touch_updated_at();
 
 -- Helper functions
+create function public.devtrack_publish_project(
+  p_project_id text,
+  p_name text,
+  p_payload jsonb,
+  p_created_at timestamptz default now(),
+  p_email text default null,
+  p_display_name text default null
+)
+returns table(remote_project_id text)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id text := auth.uid()::text;
+begin
+  if v_user_id is null then
+    raise exception 'DevTrack publish requires an authenticated Supabase user';
+  end if;
+
+  insert into public.devtrack_projects (
+    id,
+    owner_id,
+    name,
+    payload,
+    created_at,
+    updated_at
+  )
+  values (
+    p_project_id,
+    v_user_id,
+    p_name,
+    coalesce(p_payload, '{}'::jsonb),
+    coalesce(p_created_at, now()),
+    now()
+  )
+  on conflict (id) do update
+  set
+    owner_id = excluded.owner_id,
+    name = excluded.name,
+    payload = excluded.payload,
+    updated_at = now();
+
+  insert into public.devtrack_project_members (
+    project_id,
+    user_id,
+    role,
+    email,
+    display_name,
+    joined_at,
+    last_seen_at
+  )
+  values (
+    p_project_id,
+    v_user_id,
+    'owner',
+    p_email,
+    p_display_name,
+    now(),
+    now()
+  )
+  on conflict (project_id, user_id) do update
+  set
+    role = 'owner',
+    email = excluded.email,
+    display_name = excluded.display_name,
+    last_seen_at = now();
+
+  remote_project_id := p_project_id;
+  return next;
+end;
+$$;
+
 create function public.devtrack_is_project_member(project_id_arg text, allowed_roles text[] default null)
 returns boolean
 language sql
@@ -138,6 +213,37 @@ as $$
   select public.devtrack_is_project_member(project_id_arg, array['owner', 'editor']);
 $$;
 
+create function public.devtrack_touch_member_presence(
+  p_project_id text,
+  p_email text default null,
+  p_display_name text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id text := auth.uid()::text;
+  v_email text := auth.jwt() ->> 'email';
+begin
+  if v_user_id is null then
+    raise exception 'missing authenticated user';
+  end if;
+
+  update public.devtrack_project_members
+  set
+    email = coalesce(v_email, p_email, email),
+    display_name = coalesce(nullif(p_display_name, ''), display_name),
+    last_seen_at = now()
+  where project_id = p_project_id
+    and (
+      user_id = v_user_id
+      or lower(coalesce(email, '')) = lower(coalesce(v_email, ''))
+    );
+end;
+$$;
+
 -- Enable RLS
 alter table public.devtrack_projects enable row level security;
 alter table public.devtrack_project_members enable row level security;
@@ -166,6 +272,8 @@ grant usage on schema public to authenticated;
 grant select, insert, update, delete on public.devtrack_projects to authenticated;
 grant select, insert, update, delete on public.devtrack_project_members to authenticated;
 grant select, insert, update, delete on public.devtrack_sync_records to authenticated;
+grant execute on function public.devtrack_publish_project(text, text, jsonb, timestamptz, text, text) to authenticated;
+grant execute on function public.devtrack_touch_member_presence(text, text, text) to authenticated;
 
 commit;
 

@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import Layout from './components/layout/Layout';
 
 const Overview = lazy(() => import('./pages/Overview'));
+const TodayCommand = lazy(() => import('./pages/TodayCommand'));
 const Portfolio = lazy(() => import('./pages/Portfolio'));
 const TodayTasks = lazy(() => import('./pages/TodayTasks'));
 const FocusSessions = lazy(() => import('./pages/FocusSessions'));
@@ -17,10 +18,12 @@ const Gantt = lazy(() => import('./pages/Gantt'));
 const Calendar = lazy(() => import('./pages/Calendar'));
 const Sprints = lazy(() => import('./pages/Sprints'));
 const Collaboration = lazy(() => import('./pages/Collaboration'));
+const CollaborationControl = lazy(() => import('./pages/CollaborationControl'));
 const AICommandCenter = lazy(() => import('./pages/AICommandCenter'));
 const Projects = lazy(() => import('./pages/Projects'));
 const Achievements = lazy(() => import('./pages/Achievements'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
+const BackupRecovery = lazy(() => import('./pages/BackupRecovery'));
 const Invite = lazy(() => import('./pages/Invite'));
 
 function PageFallback() {
@@ -40,6 +43,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Layout />}>
             <Route index element={<Overview />} />
+            <Route path="today-command" element={<TodayCommand />} />
             <Route path="portfolio" element={<Portfolio />} />
             <Route path="today-tasks" element={<TodayTasks />} />
             <Route path="focus-sessions" element={<FocusSessions />} />
@@ -54,10 +58,12 @@ export default function App() {
             <Route path="calendar" element={<Calendar />} />
             <Route path="sprints" element={<Sprints />} />
             <Route path="collaboration" element={<Collaboration />} />
+            <Route path="collaboration-control" element={<CollaborationControl />} />
             <Route path="ai-command" element={<AICommandCenter />} />
             <Route path="projects" element={<Projects />} />
             <Route path="achievements" element={<Achievements />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="backup" element={<BackupRecovery />} />
             <Route path="invite/:token" element={<Invite />} />
           </Route>
         </Routes>

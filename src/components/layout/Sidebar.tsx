@@ -10,6 +10,7 @@ import {
   ChartNoAxesGantt,
   ChevronDown,
   Cloud,
+  DatabaseBackup,
   FileText,
   Flag,
   FolderKanban,
@@ -21,7 +22,9 @@ import {
   Layers,
   LayoutDashboard,
   Plus,
+  Route,
   Settings,
+  Stethoscope,
   Trophy,
   Upload,
   Workflow,
@@ -52,6 +55,7 @@ export default function Sidebar() {
   const currentProject = projects.find(project => project.id === currentProjectId);
 
   const navItems = [
+    { to: '/today-command', icon: Route, label: '今日指挥台' },
     { to: '/', icon: Home, label: '概览', end: true },
     { to: '/portfolio', icon: LayoutDashboard, label: '项目总览' },
     { to: '/today-tasks', icon: AlarmClock, label: '今日任务' },
@@ -67,6 +71,7 @@ export default function Sidebar() {
     { to: '/calendar', icon: CalendarDays, label: '日历' },
     { to: '/sprints', icon: Zap, label: '冲刺管理' },
     { to: '/collaboration', icon: Cloud, label: '团队协作' },
+    { to: '/collaboration-control', icon: Stethoscope, label: '协作诊断' },
     { to: '/ai-command', icon: Bot, label: 'AI 指令' },
   ];
 
@@ -252,6 +257,7 @@ export default function Sidebar() {
           <div className="space-y-1">
             {(() => {
               const sysItems = [
+                { to: '/backup', icon: DatabaseBackup, label: '备份恢复' },
                 { to: '/projects', icon: Layers, label: '项目管理' },
                 { to: '/achievements', icon: Trophy, label: '成就系统' },
               ];

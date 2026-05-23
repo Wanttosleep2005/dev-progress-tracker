@@ -20,6 +20,8 @@ import { useCloudStore } from '../../stores/useCloudStore';
 import { useNotificationStore } from '../../stores/useNotificationStore';
 
 const PAGE_TITLES: Record<string, string> = {
+  '/today-command': '今日指挥台',
+  '/backup': '备份与恢复',
   '/': '概览',
   '/portfolio': '项目总览',
   '/today-tasks': '今日任务',
@@ -33,6 +35,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/analytics': '数据分析',
   '/gantt': '甘特图',
   '/collaboration': '团队协作',
+  '/collaboration-control': '协作诊断',
   '/ai-command': 'AI 指令中心',
   '/projects': '项目管理',
   '/settings': '设置',
@@ -70,6 +73,7 @@ export default function Layout() {
   const { openPalette, query, setQuery } = useCommandPalette();
   const initCloud = useCloudStore(state => state.init);
   const syncNow = useCloudStore(state => state.syncNow);
+  const touchPresence = useCloudStore(state => state.touchPresence);
   const syncState = useCloudStore(state => state.syncState);
   const loadTeam = useCloudStore(state => state.loadTeam);
   const initNotifications = useNotificationStore(state => state.init);
@@ -85,15 +89,23 @@ export default function Layout() {
 
   useEffect(() => {
     const handleOnline = () => syncNow();
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible') touchPresence();
+    };
+    const handleFocus = () => touchPresence();
     window.addEventListener('online', handleOnline);
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisible);
     const timer = setInterval(() => {
       syncNow();
     }, 60000);
     return () => {
       window.removeEventListener('online', handleOnline);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisible);
       clearInterval(timer);
     };
-  }, [syncNow]);
+  }, [syncNow, touchPresence]);
 
   useEffect(() => {
     loadProjects();

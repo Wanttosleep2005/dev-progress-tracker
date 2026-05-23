@@ -66,6 +66,7 @@ export default function QuickActions() {
         milestoneId,
         estimatedMinutes: estimatedMinutes ? parseInt(estimatedMinutes) || null : null,
         url: '',
+        recurrence: 'none',
         source: action === 'today-task' ? 'daily' : 'board',
         remindAt: action === 'today-task' ? remindAt || null : null,
         isTodayTask: action === 'today-task',

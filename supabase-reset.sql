@@ -12,6 +12,7 @@ drop function if exists public.devtrack_touch_updated_at() cascade;
 drop function if exists public.devtrack_set_project_owner() cascade;
 drop function if exists public.devtrack_debug_auth() cascade;
 drop function if exists public.devtrack_publish_project(text, text, jsonb, timestamptz, text, text) cascade;
+drop function if exists public.devtrack_touch_member_presence(text, text, text) cascade;
 drop function if exists public.devtrack_is_project_member(text, text[]) cascade;
 drop function if exists public.devtrack_can_edit_project(text) cascade;
 drop function if exists public.devtrack_is_project_owner(text) cascade;
@@ -40,7 +41,7 @@ create table public.devtrack_sync_records (
   id text primary key,
   user_id text not null,
   remote_project_id text not null references public.devtrack_projects(id) on delete cascade,
-  entity_type text not null check (entity_type in ('projects', 'tasks', 'milestones', 'timelineEvents', 'diaryEntries')),
+  entity_type text not null check (entity_type in ('projects', 'tasks', 'milestones', 'timelineEvents', 'diaryEntries', 'sprints', 'comments')),
   entity_id integer not null,
   project_id integer,
   payload jsonb not null default '{}'::jsonb,
@@ -204,6 +205,37 @@ as $$
   );
 $$;
 
+create function public.devtrack_touch_member_presence(
+  p_project_id text,
+  p_email text default null,
+  p_display_name text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id text := auth.uid()::text;
+  v_email text := auth.jwt() ->> 'email';
+begin
+  if v_user_id is null then
+    raise exception 'missing authenticated user';
+  end if;
+
+  update public.devtrack_project_members
+  set
+    email = coalesce(v_email, p_email, email),
+    display_name = coalesce(nullif(p_display_name, ''), display_name),
+    last_seen_at = now()
+  where project_id = p_project_id
+    and (
+      user_id = v_user_id
+      or lower(coalesce(email, '')) = lower(coalesce(v_email, ''))
+    );
+end;
+$$;
+
 create function public.devtrack_is_project_owner(project_id_arg text)
 returns boolean
 language sql
@@ -352,6 +384,7 @@ grant select, insert, update, delete on public.devtrack_project_members to authe
 grant select, insert, update, delete on public.devtrack_sync_records to authenticated;
 grant execute on function public.devtrack_debug_auth() to authenticated;
 grant execute on function public.devtrack_publish_project(text, text, jsonb, timestamptz, text, text) to authenticated;
+grant execute on function public.devtrack_touch_member_presence(text, text, text) to authenticated;
 
 commit;
 
