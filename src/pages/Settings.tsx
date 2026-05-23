@@ -424,10 +424,21 @@ export default function SettingsPage() {
 
               if (ips.size > 0) {
                 const list = [...ips].sort();
+                // Also include current hostname if not localhost
+                const host = window.location.hostname;
+                if (host && host !== 'localhost' && host !== '127.0.0.1' && !host.includes('.local') && !list.includes(host)) {
+                  list.push(host);
+                }
                 setDetectedIps(list);
-                setMessage(`检测到 ${list.length} 个网络地址`);
+                setMessage(`检测到 ${list.length} 个网络地址（含当前访问地址）`);
               } else {
-                setMessage('未检测到有效 IP，请手动输入（终端运行 ipconfig 查看）');
+                const host = window.location.hostname;
+                if (host && host !== 'localhost' && host !== '127.0.0.1' && !host.includes('.local')) {
+                  setDetectedIps([host]);
+                  setMessage(`使用当前访问地址: ${host}`);
+                } else {
+                  setMessage('未检测到有效 IP。提示：通过 Radmin IP 访问本页面后重试，或手动输入 Radmin 地址');
+                }
               }
             }}
             className="rounded-xl border border-sky-500/20 bg-sky-500/10 px-3 py-1.5 text-xs text-sky-200 hover:bg-sky-500/20"
