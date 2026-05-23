@@ -39,6 +39,7 @@ export default function SettingsPage() {
     } catch { return {}; }
   });
   const [baseUrl, setBaseUrl] = useState(() => getCustomBaseUrl());
+  const [detectedIps, setDetectedIps] = useState<string[]>([]);
 
   useEffect(() => {
     import('../../package.json')
@@ -395,8 +396,8 @@ export default function SettingsPage() {
         <div className="mb-3 flex items-center gap-2">
           <button
             onClick={async () => {
-              // Try to detect LAN IP using WebRTC with explicit STUN server
-              // Some browsers return mDNS .local addresses, so we filter those out
+              setMessage('');
+              setDetectedIps([]);
               const ips = new Set<string>();
               const pc = new RTCPeerConnection({
                 iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
@@ -405,18 +406,15 @@ export default function SettingsPage() {
               const offer = await pc.createOffer();
               await pc.setLocalDescription(offer);
 
-              const gotIp = await new Promise<string | null>(resolve => {
-                const timeout = setTimeout(() => resolve(null), 4000);
+              await new Promise<void>(resolve => {
+                const timeout = setTimeout(() => resolve(), 4000);
                 pc.onicecandidate = (e) => {
-                  if (!e.candidate) { clearTimeout(timeout); resolve(null); return; }
-                  const candidate = e.candidate.candidate;
-                  // Parse IP from candidate string: "candidate:... ... IP port typ ..."
-                  const parts = candidate.split(' ');
+                  if (!e.candidate) { clearTimeout(timeout); resolve(); return; }
+                  const parts = e.candidate.candidate.split(' ');
                   const ipIdx = parts.indexOf('typ') - 2;
                   if (ipIdx > 0) {
                     const ip = parts[ipIdx];
-                    // Filter out mDNS (.local), IPv6 (:), loopback
-                    if (ip && !ip.includes(':') && !ip.includes('.local') && ip !== '127.0.0.1' && !ip.startsWith('0.')) {
+                    if (ip && !ip.includes('.local') && ip !== '127.0.0.1' && !ip.startsWith('0.')) {
                       ips.add(ip);
                     }
                   }
@@ -425,22 +423,11 @@ export default function SettingsPage() {
               pc.close();
 
               if (ips.size > 0) {
-                const ip = [...ips][0];
-                const url = `http://${ip}:5173`;
-                setBaseUrl(url);
-                setCustomBaseUrl(url);
-                setMessage(`已检测到 LAN IP：${ip}`);
+                const list = [...ips].sort();
+                setDetectedIps(list);
+                setMessage(`检测到 ${list.length} 个网络地址`);
               } else {
-                // Fallback: try using hostname
-                const host = window.location.hostname;
-                if (host && host !== 'localhost' && host !== '127.0.0.1') {
-                  const url = `http://${host}:5173`;
-                  setBaseUrl(url);
-                  setCustomBaseUrl(url);
-                  setMessage(`已使用当前地址：${host}`);
-                } else {
-                  setMessage('未检测到有效局域网 IP，请手动输入（Windows: 终端运行 ipconfig 查看 IPv4 地址）');
-                }
+                setMessage('未检测到有效 IP，请手动输入（终端运行 ipconfig 查看）');
               }
             }}
             className="rounded-xl border border-sky-500/20 bg-sky-500/10 px-3 py-1.5 text-xs text-sky-200 hover:bg-sky-500/20"
@@ -449,6 +436,24 @@ export default function SettingsPage() {
           </button>
           <span className="text-[10px] text-slate-600">或手动输入（Windows: <code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono">ipconfig</code> 查看 IPv4 地址）</span>
         </div>
+        {detectedIps.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {detectedIps.map(ip => (
+              <button
+                key={ip}
+                onClick={() => {
+                  const url = `http://${ip}:5173`;
+                  setBaseUrl(url);
+                  setCustomBaseUrl(url);
+                  setMessage(`已选择: ${url}`);
+                }}
+                className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200 hover:bg-emerald-500/20 transition"
+              >
+                {ip}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex items-center gap-3">
           <input
             value={baseUrl}
