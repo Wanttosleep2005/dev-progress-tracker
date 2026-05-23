@@ -371,6 +371,24 @@ export async function importSharedProjects(session: CloudSession): Promise<numbe
     }
   }
 
+  // 清理孤儿项目：远端已删除但本地仍有数据
+  const remoteProjectIdSet = new Set(projects.map(p => p.id));
+  const localSharedProjects = await db.projects.filter(p => p.remoteProjectId != null).toArray();
+  for (const local of localSharedProjects) {
+    if (!local.remoteProjectId || remoteProjectIdSet.has(local.remoteProjectId)) continue;
+    if (deletedRemoteProjectIds.has(local.remoteProjectId)) continue;
+    // 远端已删除 → 清理本地所有关联数据
+    await withoutSyncTracking(async () => {
+      await db.tasks.where('projectId').equals(local.id!).delete();
+      await db.milestones.where('projectId').equals(local.id!).delete();
+      await db.timelineEvents.where('projectId').equals(local.id!).delete();
+      await db.diaryEntries.where('projectId').equals(local.id!).delete();
+      await db.teamMembers.where('projectId').equals(local.id!).delete();
+      await db.syncChanges.where('projectId').equals(local.id!).delete();
+      await db.projects.delete(local.id!);
+    });
+  }
+
   return localProjectIds;
 }
 
