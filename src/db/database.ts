@@ -8,8 +8,10 @@ import type {
   Milestone,
   Notification,
   Project,
+  Sprint,
   SyncChange,
   Task,
+  TaskComment,
   TeamMember,
   TimelineEvent,
   User,
@@ -28,13 +30,15 @@ class DevTrackDatabase extends Dexie {
   collaborationEvents!: Table<CollaborationEvent, number>;
   notifications!: Table<Notification, number>;
   inviteLinks!: Table<InviteLink, number>;
+  sprints!: Table<Sprint, number>;
+  comments!: Table<TaskComment, number>;
 
   constructor() {
     super('DevTrackDB');
-    this.version(10)
+    this.version(12)
       .stores({
         projects: '++id, remoteProjectId, status, createdAt',
-        tasks: '++id, projectId, status, priority, milestoneId, dueDate, isTodayTask, remindAt, assigneeId, recurrence, createdAt',
+        tasks: '++id, projectId, status, priority, milestoneId, dueDate, isTodayTask, remindAt, assigneeId, recurrence, sprintId, createdAt',
         milestones: '++id, projectId, status, dueDate, createdAt',
         timelineEvents: '++id, projectId, type, date, relatedTaskId',
         diaryEntries: '++id, projectId, date',
@@ -45,6 +49,8 @@ class DevTrackDatabase extends Dexie {
         collaborationEvents: '++id, projectId, userId, type, createdAt',
         notifications: '++id, type, read, projectId, createdAt',
         inviteLinks: '++id, projectId, token, createdBy, createdAt',
+        sprints: '++id, projectId, status, startDate, endDate',
+        comments: '++id, taskId, createdAt',
       })
       .upgrade(async tx => {
         const tasks = await tx.table('tasks').toArray();
@@ -100,6 +106,28 @@ class DevTrackDatabase extends Dexie {
           if (!('syncUpdatedAt' in milestone)) patch.syncUpdatedAt = milestone.updatedAt ?? null;
           if (Object.keys(patch).length > 0) {
             await tx.table('milestones').update(milestone.id, patch);
+          }
+        }
+      })
+      .upgrade(async tx => {
+        const tasks = await tx.table('tasks').toArray();
+        for (const task of tasks) {
+          const patch: Partial<Task> = {};
+          if (!('subtasks' in task)) patch.subtasks = [];
+          if (!('trackedMinutes' in task)) patch.trackedMinutes = 0;
+          if (!('sprintId' in task)) patch.sprintId = null;
+          if (Object.keys(patch).length > 0) {
+            await tx.table('tasks').update(task.id, patch);
+          }
+        }
+      })
+      .upgrade(async tx => {
+        const tasks = await tx.table('tasks').toArray();
+        for (const task of tasks) {
+          const patch: Partial<Task> = {};
+          if (!('pomodoroGoal' in task)) patch.pomodoroGoal = null;
+          if (Object.keys(patch).length > 0) {
+            await tx.table('tasks').update(task.id, patch);
           }
         }
       });
@@ -382,4 +410,36 @@ export async function markAllNotificationsRead(): Promise<void> {
 
 export async function clearNotifications(): Promise<void> {
   await db.notifications.clear();
+}
+
+// Sprint CRUD
+export async function getSprintsByProject(projectId: number): Promise<Sprint[]> {
+  return db.sprints.where('projectId').equals(projectId).toArray();
+}
+
+export async function addSprint(sprint: Omit<Sprint, 'id' | 'createdAt' | 'updatedAt'>): Promise<number> {
+  const now = new Date().toISOString();
+  return db.sprints.add({ ...sprint, createdAt: now, updatedAt: now });
+}
+
+export async function updateSprint(id: number, changes: Partial<Sprint>): Promise<number> {
+  return db.sprints.update(id, { ...changes, updatedAt: new Date().toISOString() });
+}
+
+export async function deleteSprint(id: number): Promise<void> {
+  await db.tasks.where('sprintId').equals(id).modify({ sprintId: null });
+  await db.sprints.delete(id);
+}
+
+// Comment CRUD
+export async function getCommentsByTask(taskId: number): Promise<TaskComment[]> {
+  return db.comments.where('taskId').equals(taskId).toArray();
+}
+
+export async function addComment(comment: Omit<TaskComment, 'id' | 'createdAt'>): Promise<number> {
+  return db.comments.add({ ...comment, createdAt: new Date().toISOString() });
+}
+
+export async function deleteComment(id: number): Promise<void> {
+  await db.comments.delete(id);
 }

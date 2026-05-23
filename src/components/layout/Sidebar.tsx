@@ -6,9 +6,12 @@ import {
   Bot,
   BookOpen,
   Calendar,
+  CalendarDays,
   ChartNoAxesGantt,
   ChevronDown,
   Cloud,
+  FileText,
+  Flag,
   FolderKanban,
   FolderOpen,
   GitBranch,
@@ -19,10 +22,13 @@ import {
   LayoutDashboard,
   Plus,
   Settings,
+  Trophy,
   Upload,
   Workflow,
+  Zap,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/useAppStore';
+import { useSidebarStore } from '../../stores/useSidebarStore';
 import { PROJECT_COLORS, PROJECT_ICONS } from '../../types';
 import FocusTimerPanel from '../FocusTimer';
 import NotificationBell from '../NotificationBell';
@@ -31,6 +37,7 @@ import { applyTemplate, PROJECT_TEMPLATES } from '../../lib/templates';
 export default function Sidebar() {
   const navigate = useNavigate();
   const { projects, currentProjectId, setCurrentProject, addProject, updateProject } = useAppStore();
+  const sidebarItems = useSidebarStore(state => state.items);
 
   const [showSelector, setShowSelector] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -52,11 +59,13 @@ export default function Sidebar() {
     { to: '/dependencies', icon: Workflow, label: '任务依赖' },
     { to: '/pomodoro', icon: AlarmClock, label: '番茄钟' },
     { to: '/focus-sessions', icon: History, label: '专注记录' },
-    { to: '/milestones', icon: FolderOpen, label: '里程碑' },
+    { to: '/milestones', icon: Flag, label: '里程碑' },
     { to: '/timeline', icon: GitBranch, label: '时间线' },
     { to: '/diary', icon: BookOpen, label: '开发日志' },
     { to: '/analytics', icon: BarChart3, label: '数据分析' },
     { to: '/gantt', icon: ChartNoAxesGantt, label: '甘特图' },
+    { to: '/calendar', icon: CalendarDays, label: '日历' },
+    { to: '/sprints', icon: Zap, label: '冲刺管理' },
     { to: '/collaboration', icon: Cloud, label: '团队协作' },
     { to: '/ai-command', icon: Bot, label: 'AI 指令' },
   ];
@@ -210,7 +219,10 @@ export default function Sidebar() {
 
       <nav className="flex-1 overflow-y-auto px-4 py-4">
         <div className="space-y-1">
-          {navItems.map(item => (
+          {navItems.filter(item => {
+            const config = sidebarItems.find(s => s.to === item.to);
+            return !config || config.visible;
+          }).map(item => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -223,8 +235,14 @@ export default function Sidebar() {
                 }`
               }
             >
-              <item.icon size={18} className="shrink-0" />
-              <span>{item.label}</span>
+              {({ isActive }) => (
+                <>
+                  <div className={`flex h-8 w-8 items-center justify-center rounded-xl shrink-0 transition-all ${isActive ? 'bg-sky-500/15 shadow-[0_0_12px_rgba(14,165,233,0.15)]' : 'bg-white/[0.03]'}`}>
+                    <item.icon size={18} className={isActive ? 'text-sky-300' : 'text-slate-400'} />
+                  </div>
+                  <span>{item.label}</span>
+                </>
+              )}
             </NavLink>
           ))}
         </div>
@@ -232,19 +250,37 @@ export default function Sidebar() {
         <div className="mt-5 border-t border-white/[0.05] pt-5">
           <p className="mb-2 px-2 text-[10px] uppercase tracking-[0.2em] text-slate-600">系统</p>
           <div className="space-y-1">
-            <NavLink
-              to="/projects"
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
-                  isActive
-                    ? 'border border-sky-500/20 bg-sky-500/10 text-sky-300'
-                    : 'border border-transparent text-slate-400 hover:bg-white/[0.03] hover:text-slate-200'
-                }`
-              }
-            >
-              <Layers size={18} className="shrink-0" />
-              <span>项目管理</span>
-            </NavLink>
+            {(() => {
+              const sysItems = [
+                { to: '/projects', icon: Layers, label: '项目管理' },
+                { to: '/achievements', icon: Trophy, label: '成就系统' },
+              ];
+              return sysItems.filter(item => {
+                const config = sidebarItems.find(s => s.to === item.to);
+                return !config || config.visible;
+              }).map(item => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
+                      isActive
+                        ? 'border border-sky-500/20 bg-sky-500/10 text-sky-300'
+                        : 'border border-transparent text-slate-400 hover:bg-white/[0.03] hover:text-slate-200'
+                    }`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <div className={`flex h-8 w-8 items-center justify-center rounded-xl shrink-0 transition-all ${isActive ? 'bg-sky-500/15 shadow-[0_0_12px_rgba(14,165,233,0.15)]' : 'bg-white/[0.03]'}`}>
+                        <item.icon size={18} className={isActive ? 'text-sky-300' : 'text-slate-400'} />
+                      </div>
+                      <span>{item.label}</span>
+                    </>
+                  )}
+                </NavLink>
+              ));
+            })()}
           </div>
         </div>
       </nav>

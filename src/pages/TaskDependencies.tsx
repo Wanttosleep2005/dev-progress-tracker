@@ -23,9 +23,9 @@ import {
   type IsValidConnection,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { ArrowDownToLine, RefreshCw, Search, Wand2, Workflow } from 'lucide-react';
+import { ArrowDownToLine, ArrowUp, Calendar, Clock, GitBranch, RefreshCw, Search, Wand2, Workflow } from 'lucide-react';
 import { useTaskStore } from '../stores/useTaskStore';
-import { STATUS_LABELS, type Task, type TaskStatus } from '../types';
+import { PRIORITY_COLORS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS, type Task, type TaskStatus } from '../types';
 import { getBlockingTasks, getDependentTasks, getTaskDependencyIds, isTaskBlocked, normalizeDependencyIds } from '../lib/taskDependencies';
 
 type NodeState = TaskStatus | 'blocked';
@@ -38,28 +38,20 @@ interface DependencyNodeData extends Record<string, unknown> {
 type DependencyNode = Node<DependencyNodeData, 'dependencyTask'>;
 type DependencyEdge = Edge<{ dependency: true }>;
 
-const NODE_WIDTH = 260;
-const NODE_HEIGHT = 136;
-const COLUMN_GAP = 360;
-const ROW_GAP = 178;
-const SIDE_SOURCE_HANDLE_CLASS = '!h-24 !w-8 !rounded-full !border-2 !border-cyan-100/70 !bg-cyan-400/55 !shadow-[0_0_18px_rgba(34,211,238,0.42)] !transition hover:!bg-cyan-300/80';
-const SIDE_TARGET_HANDLE_CLASS = '!h-24 !w-8 !rounded-full !border-2 !border-cyan-100/70 !bg-[#08111f]/80 !shadow-[0_0_18px_rgba(34,211,238,0.28)] !transition hover:!bg-cyan-950';
-const EDGE_SOURCE_HANDLE_CLASS = '!h-8 !w-24 !rounded-full !border-2 !border-cyan-100/70 !bg-cyan-400/50 !shadow-[0_0_18px_rgba(34,211,238,0.36)] !transition hover:!bg-cyan-300/75';
-const EDGE_TARGET_HANDLE_CLASS = '!h-8 !w-24 !rounded-full !border-2 !border-cyan-100/70 !bg-[#08111f]/80 !shadow-[0_0_18px_rgba(34,211,238,0.24)] !transition hover:!bg-cyan-950';
-
-const nodeStyles: Record<NodeState, string> = {
-  done: 'border-emerald-500/35 bg-emerald-500/10 text-emerald-100 shadow-emerald-950/20',
-  in_progress: 'border-sky-500/35 bg-sky-500/10 text-sky-100 shadow-sky-950/20',
-  review: 'border-amber-500/35 bg-amber-500/10 text-amber-100 shadow-amber-950/20',
-  todo: 'border-slate-500/25 bg-slate-500/10 text-slate-100 shadow-slate-950/20',
-  blocked: 'border-red-500/40 bg-red-500/10 text-red-100 shadow-red-950/30',
-};
+const NODE_WIDTH = 280;
+const NODE_HEIGHT = 160;
+const COLUMN_GAP = 400;
+const ROW_GAP = 200;
+const SIDE_SOURCE_HANDLE_CLASS = '!h-12 !w-4 !rounded-full !border-2 !border-cyan-400/60 !bg-cyan-400/40 !shadow-[0_0_12px_rgba(34,211,238,0.35)] !transition hover:!bg-cyan-300/70';
+const SIDE_TARGET_HANDLE_CLASS = '!h-12 !w-4 !rounded-full !border-2 !border-cyan-400/40 !bg-[#08111f]/80 !shadow-[0_0_12px_rgba(34,211,238,0.2)] !transition hover:!bg-cyan-950';
+const EDGE_SOURCE_HANDLE_CLASS = '!h-4 !w-12 !rounded-full !border-2 !border-cyan-400/60 !bg-cyan-400/40 !shadow-[0_0_12px_rgba(34,211,238,0.3)] !transition hover:!bg-cyan-300/65';
+const EDGE_TARGET_HANDLE_CLASS = '!h-4 !w-12 !rounded-full !border-2 !border-cyan-400/40 !bg-[#08111f]/80 !shadow-[0_0_12px_rgba(34,211,238,0.18)] !transition hover:!bg-cyan-950';
 
 const minimapColors: Record<NodeState, string> = {
-  done: '#10b981',
-  in_progress: '#0ea5e9',
-  review: '#f59e0b',
-  todo: '#64748b',
+  done: STATUS_COLORS.done,
+  in_progress: STATUS_COLORS.in_progress,
+  review: STATUS_COLORS.review,
+  todo: STATUS_COLORS.todo,
   blocked: '#ef4444',
 };
 
@@ -121,71 +113,90 @@ function DependencyTaskNode({ data, selected }: NodeProps<DependencyNode>) {
   const state = getNodeState(task, tasks);
   const blockers = getBlockingTasks(task, tasks);
   const dependents = getDependentTasks(task, tasks);
+  const depCount = getTaskDependencyIds(task).length;
+  const subtaskTotal = task.subtasks?.length || 0;
+  const subtaskDone = task.subtasks?.filter(s => s.done).length || 0;
+  const subtaskProgress = subtaskTotal > 0 ? Math.round((subtaskDone / subtaskTotal) * 100) : 0;
+
   return (
-    <div className={`relative h-[136px] w-[260px] rounded-2xl border p-4 shadow-2xl backdrop-blur ${nodeStyles[state]} ${selected ? 'ring-2 ring-cyan-300/50' : ''}`}>
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="target-left"
-        className={SIDE_TARGET_HANDLE_CLASS}
-        style={{ left: -14 }}
-        isConnectable
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="source-right"
-        className={SIDE_SOURCE_HANDLE_CLASS}
-        style={{ right: -14 }}
-        isConnectable
-      />
-      <Handle
-        type="target"
-        position={Position.Top}
-        id="target-top"
-        className={EDGE_TARGET_HANDLE_CLASS}
-        style={{ left: '32%', top: -14 }}
-        isConnectable
-      />
-      <Handle
-        type="source"
-        position={Position.Top}
-        id="source-top"
-        className={EDGE_SOURCE_HANDLE_CLASS}
-        style={{ left: '68%', top: -14 }}
-        isConnectable
-      />
-      <Handle
-        type="target"
-        position={Position.Bottom}
-        id="target-bottom"
-        className={EDGE_TARGET_HANDLE_CLASS}
-        style={{ left: '32%', bottom: -14 }}
-        isConnectable
-      />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="source-bottom"
-        className={EDGE_SOURCE_HANDLE_CLASS}
-        style={{ left: '68%', bottom: -14 }}
-        isConnectable
-      />
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="line-clamp-2 text-sm font-semibold text-white">{task.title}</p>
-          <p className="mt-1 text-[11px] text-slate-400">{STATUS_LABELS[task.status]}</p>
+    <div
+      className={`relative w-[280px] rounded-2xl border transition-all duration-200 ${
+        selected ? 'ring-2 ring-cyan-400/50 shadow-[0_0_20px_rgba(34,211,238,0.15)]' : 'shadow-lg'
+      }`}
+    >
+      {/* Handles - outside card to avoid overflow clipping */}
+      <Handle type="target" position={Position.Left} id="target-left" className={`${SIDE_TARGET_HANDLE_CLASS} z-10`} style={{ left: -14 }} isConnectable />
+      <Handle type="source" position={Position.Right} id="source-right" className={`${SIDE_SOURCE_HANDLE_CLASS} z-10`} style={{ right: -14 }} isConnectable />
+      <Handle type="target" position={Position.Top} id="target-top" className={`${EDGE_TARGET_HANDLE_CLASS} z-10`} style={{ left: '32%', top: -14 }} isConnectable />
+      <Handle type="source" position={Position.Top} id="source-top" className={`${EDGE_SOURCE_HANDLE_CLASS} z-10`} style={{ left: '68%', top: -14 }} isConnectable />
+      <Handle type="target" position={Position.Bottom} id="target-bottom" className={`${EDGE_TARGET_HANDLE_CLASS} z-10`} style={{ left: '32%', bottom: -14 }} isConnectable />
+      <Handle type="source" position={Position.Bottom} id="source-bottom" className={`${EDGE_SOURCE_HANDLE_CLASS} z-10`} style={{ left: '68%', bottom: -14 }} isConnectable />
+
+      {/* Left accent bar */}
+      <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl overflow-hidden" style={{ backgroundColor: STATUS_COLORS[task.status] }} />
+
+      {/* Main card body */}
+      <div className="bg-[#0b1424]/95 backdrop-blur p-4 pl-5 rounded-2xl overflow-hidden">
+
+        {/* Header row: status dot + priority */}
+        <div className="mb-2 flex items-center gap-2">
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: STATUS_COLORS[task.status] }} />
+          <span className="text-[10px] font-medium" style={{ color: STATUS_COLORS[task.status] }}>{STATUS_LABELS[task.status]}</span>
+          {state === 'blocked' && (
+            <span className="ml-auto rounded-full bg-red-500/10 px-1.5 py-0.5 text-[9px] text-red-300 font-medium">被阻塞</span>
+          )}
+          <span className="ml-auto rounded-full px-1.5 py-0.5 text-[9px] font-medium" style={{ color: PRIORITY_COLORS[task.priority], backgroundColor: `${PRIORITY_COLORS[task.priority]}12` }}>
+            {PRIORITY_LABELS[task.priority]}
+          </span>
         </div>
-        <span className="rounded-full bg-black/20 px-2 py-1 text-[10px] text-slate-300">{state === 'blocked' ? '被阻塞' : STATUS_LABELS[task.status]}</span>
+
+        {/* Title */}
+        <p className="mb-1.5 line-clamp-2 text-sm font-bold text-white leading-tight">{task.title}</p>
+        {task.description && (
+          <p className="mb-2 line-clamp-1 text-[11px] text-slate-500/80">{task.description}</p>
+        )}
+
+        {/* Meta chips */}
+        <div className="mb-2 flex flex-wrap items-center gap-1">
+          {depCount > 0 && (
+            <span className="inline-flex items-center gap-0.5 rounded-md bg-cyan-500/8 px-1.5 py-0.5 text-[9px] text-cyan-300/80">
+              <GitBranch size={9} /> {depCount}
+            </span>
+          )}
+          {dependents.length > 0 && (
+            <span className="inline-flex items-center gap-0.5 rounded-md bg-violet-500/8 px-1.5 py-0.5 text-[9px] text-violet-300/80">
+              <ArrowUp size={9} /> {dependents.length}
+            </span>
+          )}
+          {task.dueDate && (
+            <span className="inline-flex items-center gap-0.5 rounded-md bg-white/[0.04] px-1.5 py-0.5 text-[9px] text-slate-400">
+              <Calendar size={9} /> {task.dueDate}
+            </span>
+          )}
+          {(task.trackedMinutes ?? 0) > 0 && (
+            <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-500/8 px-1.5 py-0.5 text-[9px] text-emerald-300/80">
+              <Clock size={9} /> {Math.floor((task.trackedMinutes ?? 0) / 60)}h
+            </span>
+          )}
+        </div>
+
+        {/* Subtask progress bar */}
+        {subtaskTotal > 0 && (
+          <div className="mt-2">
+            <div className="h-1 overflow-hidden rounded-full bg-white/[0.05]">
+              <div className="h-full rounded-full bg-gradient-to-r from-cyan-500/70 to-blue-500/70" style={{ width: `${subtaskProgress}%` }} />
+            </div>
+            <p className="mt-0.5 text-[9px] text-slate-600">{subtaskDone}/{subtaskTotal} 子任务</p>
+          </div>
+        )}
+
+        {/* Blocked warning */}
+        {blockers.length > 0 && (
+          <div className="mt-2 rounded-md bg-red-500/5 border border-red-500/10 px-2 py-1">
+            <p className="text-[9px] text-red-300/70 leading-tight">等待: {blockers.map(b => b.title).join(', ')}</p>
+          </div>
+        )}
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        <span className="rounded-full bg-black/20 px-2 py-1 text-[10px] text-slate-300">依赖 {getTaskDependencyIds(task).length}</span>
-        <span className="rounded-full bg-black/20 px-2 py-1 text-[10px] text-slate-300">被依赖 {dependents.length}</span>
-        {task.dueDate && <span className="rounded-full bg-black/20 px-2 py-1 text-[10px] text-slate-300">{task.dueDate}</span>}
-      </div>
-      {blockers.length > 0 && (
-        <p className="mt-3 line-clamp-2 text-[11px] text-red-100">依赖未完成：{blockers.map(item => item.title).join('、')}</p>
-      )}
     </div>
   );
 }
@@ -246,8 +257,8 @@ export default function TaskDependencies() {
           targetHandle: null,
           type: 'bezier',
           data: { dependency: true },
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#67e8f9', width: 18, height: 18 },
-          style: { stroke: '#67e8f9', strokeWidth: 2 },
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#67e8f9', width: 14, height: 14 },
+          style: { stroke: '#67e8f9', strokeWidth: 2, opacity: 0.7 },
         }));
     });
 
@@ -276,8 +287,8 @@ export default function TaskDependencies() {
       ...connection,
       id: `${sourceId}->${targetId}`,
       type: 'bezier',
-      markerEnd: { type: MarkerType.ArrowClosed, color: '#67e8f9', width: 18, height: 18 },
-      style: { stroke: '#67e8f9', strokeWidth: 2 },
+      markerEnd: { type: MarkerType.ArrowClosed, color: '#67e8f9', width: 14, height: 14 },
+      style: { stroke: '#67e8f9', strokeWidth: 2, opacity: 0.7 },
       data: { dependency: true },
     }, current));
     await persistDependency(targetId, nextDependencyIds);
@@ -371,17 +382,17 @@ export default function TaskDependencies() {
             maxZoom={1.6}
             connectOnClick
             connectionMode={ConnectionMode.Loose}
-            connectionRadius={180}
+            connectionRadius={200}
             connectionLineType={ConnectionLineType.Bezier}
             isValidConnection={isValidConnection}
             defaultEdgeOptions={{
               type: 'bezier',
-              markerEnd: { type: MarkerType.ArrowClosed, color: '#67e8f9', width: 18, height: 18 },
-              style: { stroke: '#67e8f9', strokeWidth: 2 },
+              markerEnd: { type: MarkerType.ArrowClosed, color: '#67e8f9', width: 14, height: 14 },
+              style: { stroke: '#67e8f9', strokeWidth: 2, opacity: 0.7, filter: 'drop-shadow(0 0 4px rgba(103,232,249,0.3))' },
             }}
             className="dependency-flow"
           >
-            <Background color="rgba(148,163,184,0.18)" gap={22} size={1} />
+            <Background color="rgba(148,163,184,0.12)" gap={24} size={1.5} />
             <Controls showInteractive={false} position="bottom-right" />
             <MiniMap
               pannable

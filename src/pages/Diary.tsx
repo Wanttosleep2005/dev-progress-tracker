@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { BookOpen, CalendarDays, ChevronLeft, ChevronRight, Edit3, Eye, FilePlus, Flame, Hash, Save, Tag, Trash2, Upload } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
 import { useAppStore } from '../stores/useAppStore';
 import { useDiaryStore } from '../stores/useDiaryStore';
 import { useToast } from '../stores/useToast';
@@ -345,21 +346,33 @@ export default function Diary() {
                 <p className="mb-3 text-xs font-medium text-slate-500">实时预览</p>
                 <div className="prose prose-invert prose-sm max-w-none rounded-lg border border-white/[0.05] bg-[#0a101a] p-4 min-h-[420px] text-slate-300 overflow-auto" style={{ maxHeight: 'calc(100vh - 360px)' }}>
                   {content.trim() ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}
                       components={{
-                        h1: ({ children }) => <h1 className="mb-3 mt-6 text-xl font-bold text-white first:mt-0">{children}</h1>,
-                        h2: ({ children }) => <h2 className="mb-2 mt-4 text-base font-semibold text-slate-200">{children}</h2>,
+                        h1: ({ children }) => <h1 className="mb-4 mt-8 pb-2 text-2xl font-bold text-white border-b border-white/[0.06] first:mt-0">{children}</h1>,
+                        h2: ({ children }) => <h2 className="mb-3 mt-6 text-lg font-semibold text-slate-100 first:mt-0">{children}</h2>,
                         h3: ({ children }) => <h3 className="mb-2 mt-3 text-sm font-semibold text-slate-300">{children}</h3>,
                         p: ({ children }) => <p className="mb-2 leading-relaxed">{children}</p>,
                         ul: ({ children }) => <ul className="mb-2 ml-4 list-disc space-y-1">{children}</ul>,
                         ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-1">{children}</ol>,
                         li: ({ children }) => <li className="text-slate-300">{children}</li>,
-                        code: ({ children, className }) =>
-                          className?.includes('language-') ? (
-                            <pre className="my-2 overflow-auto rounded-lg border border-white/[0.06] bg-[#060d18] p-3 text-xs">{children}</pre>
-                          ) : (
-                            <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[12px] text-cyan-300">{children}</code>
-                          ),
+                        table: ({ children }) => <div className="my-3 overflow-x-auto rounded-xl border border-white/[0.06]"><table className="w-full text-xs">{children}</table></div>,
+                        thead: ({ children }) => <thead className="border-b border-white/[0.06] bg-white/[0.02]">{children}</thead>,
+                        th: ({ children }) => <th className="px-3 py-2 text-left text-[11px] font-medium text-slate-400">{children}</th>,
+                        td: ({ children }) => <td className="px-3 py-2 text-[12px] text-slate-300 border-t border-white/[0.03]">{children}</td>,
+                        img: ({ src, alt }) => <img src={src} alt={alt} className="my-3 max-w-full rounded-xl border border-white/[0.06]" />,
+                      code: ({ children, className, ...props }) => {
+                        const match = /language-(\w+)/.exec(className || '');
+                        return match ? (
+                          <div className="my-3 overflow-hidden rounded-xl border border-white/[0.06]">
+                            <div className="flex items-center justify-between bg-[#060d18] px-4 py-1.5 border-b border-white/[0.04]">
+                              <span className="text-[10px] uppercase tracking-wider text-slate-500">{match[1]}</span>
+                            </div>
+                            <pre className="overflow-auto bg-[#060d18] p-4 text-xs leading-relaxed"><code className={`hljs language-${match[1]}`} {...props}>{children}</code></pre>
+                          </div>
+                        ) : (
+                          <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[12px] text-cyan-300" {...props}>{children}</code>
+                        );
+                      },
                         blockquote: ({ children }) => <blockquote className="my-2 border-l-2 border-sky-500/40 pl-3 text-slate-400 italic">{children}</blockquote>,
                         a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer" className="text-sky-400 underline underline-offset-2 hover:text-sky-300">{children}</a>,
                         hr: () => <hr className="my-4 border-white/[0.06]" />,
@@ -404,21 +417,33 @@ export default function Diary() {
                   ) : (
                     <div className="prose prose-invert prose-sm max-w-none leading-relaxed text-slate-300">
                       {currentEntry.content ? (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}
                           components={{
-                            h1: ({ children }) => <h1 className="mb-3 mt-6 text-xl font-bold text-white first:mt-0">{children}</h1>,
-                            h2: ({ children }) => <h2 className="mb-2 mt-4 text-base font-semibold text-slate-200">{children}</h2>,
+                            h1: ({ children }) => <h1 className="mb-4 mt-8 pb-2 text-2xl font-bold text-white border-b border-white/[0.06] first:mt-0">{children}</h1>,
+                            h2: ({ children }) => <h2 className="mb-3 mt-6 text-lg font-semibold text-slate-100 first:mt-0">{children}</h2>,
                             h3: ({ children }) => <h3 className="mb-2 mt-3 text-sm font-semibold text-slate-300">{children}</h3>,
                             p: ({ children }) => <p className="mb-2 leading-relaxed">{children}</p>,
                             ul: ({ children }) => <ul className="mb-2 ml-4 list-disc space-y-1">{children}</ul>,
                             ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-1">{children}</ol>,
                             li: ({ children }) => <li className="text-slate-300">{children}</li>,
-                            code: ({ children, className }) =>
-                              className?.includes('language-') ? (
-                                <pre className="my-2 overflow-auto rounded-lg border border-white/[0.06] bg-[#060d18] p-3 text-xs"><code>{children}</code></pre>
-                              ) : (
-                                <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[12px] text-cyan-300">{children}</code>
-                              ),
+                            table: ({ children }) => <div className="my-3 overflow-x-auto rounded-xl border border-white/[0.06]"><table className="w-full text-xs">{children}</table></div>,
+                            thead: ({ children }) => <thead className="border-b border-white/[0.06] bg-white/[0.02]">{children}</thead>,
+                            th: ({ children }) => <th className="px-3 py-2 text-left text-[11px] font-medium text-slate-400">{children}</th>,
+                            td: ({ children }) => <td className="px-3 py-2 text-[12px] text-slate-300 border-t border-white/[0.03]">{children}</td>,
+                            img: ({ src, alt }) => <img src={src} alt={alt} className="my-3 max-w-full rounded-xl border border-white/[0.06]" />,
+                          code: ({ children, className, ...props }) => {
+                            const match = /language-(\w+)/.exec(className || '');
+                            return match ? (
+                              <div className="my-3 overflow-hidden rounded-xl border border-white/[0.06]">
+                                <div className="flex items-center justify-between bg-[#060d18] px-4 py-1.5 border-b border-white/[0.04]">
+                                  <span className="text-[10px] uppercase tracking-wider text-slate-500">{match[1]}</span>
+                                </div>
+                                <pre className="overflow-auto bg-[#060d18] p-4 text-xs leading-relaxed"><code className={`hljs language-${match[1]}`} {...props}>{children}</code></pre>
+                              </div>
+                            ) : (
+                              <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[12px] text-cyan-300" {...props}>{children}</code>
+                            );
+                          },
                             blockquote: ({ children }) => <blockquote className="my-2 border-l-2 border-sky-500/40 pl-3 text-slate-400 italic">{children}</blockquote>,
                             a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer" className="text-sky-400 underline underline-offset-2 hover:text-sky-300">{children}</a>,
                             hr: () => <hr className="my-4 border-white/[0.06]" />,

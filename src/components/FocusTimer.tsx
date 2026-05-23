@@ -5,6 +5,7 @@ import { useAppStore } from '../stores/useAppStore';
 import { useStatsStore } from '../stores/useStatsStore';
 import { useToast } from '../stores/useToast';
 import { useTaskStore } from '../stores/useTaskStore';
+import { useTaskTimerStore } from '../stores/useTaskTimerStore';
 import { formatDurationFromSeconds } from '../lib/duration';
 
 let globalState: 'idle' | 'running' | 'paused' = 'idle';
@@ -26,6 +27,11 @@ function clearGlobalTimer() {
 }
 
 export function startFocusTimer(taskTitle?: string, taskId?: number | null) {
+  // Pause task timer if running
+  const taskTimer = useTaskTimerStore.getState();
+  if (taskTimer.isRunning) {
+    taskTimer.pause();
+  }
   clearGlobalTimer();
   globalState = 'running';
   globalSeconds = 0;

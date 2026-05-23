@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Bell, Database, Download, FileText, Info, Settings, Sparkles, Trash2, Trophy, Upload } from 'lucide-react';
+import { Bell, Database, Download, Eye, FileText, Info, Keyboard, Settings, Sparkles, Trash2, Upload } from 'lucide-react';
 import { db } from '../db/database';
 import { buildWeeklyReport } from '../lib/reporting';
 import { useAppStore } from '../stores/useAppStore';
@@ -9,18 +9,34 @@ import { useMilestoneStore } from '../stores/useMilestoneStore';
 import { useTaskStore } from '../stores/useTaskStore';
 import { useTheme } from '../stores/useTheme';
 import { usePreferences } from '../stores/usePreferences';
+import { useSidebarStore } from '../stores/useSidebarStore';
 import { useNotificationStore } from '../stores/useNotificationStore';
+import TimePicker from '../components/ui/TimePicker';
+import type { TaskPriority, TaskStatus } from '../types';
 
 export default function SettingsPage() {
-  const { achievements, currentProjectId, projects } = useAppStore();
+  const { currentProjectId, projects } = useAppStore();
   const tasks = useTaskStore(state => state.tasks);
+  const { add: addTask, load: loadTasks } = useTaskStore();
   const milestones = useMilestoneStore(state => state.milestones);
   const diaryEntries = useDiaryStore(state => state.entries);
   const { theme, setTheme } = useTheme();
   const { animationsEnabled, setAnimationsEnabled } = usePreferences();
   const { settings: notificationSettings, requestPermission, updateSettings } = useNotificationStore();
+  const { items: sidebarItems, init: initSidebar, toggle: toggleSidebarItem, hideAll, showAll } = useSidebarStore();
   const [message, setMessage] = useState('');
   const [version, setVersion] = useState('0.0.0');
+  const [shortcuts, setShortcuts] = useState(() => {
+    try {
+      const saved = localStorage.getItem('devtrack-shortcuts');
+      return saved ? JSON.parse(saved) : {
+        commandPalette: 'mod+k',
+        newTask: 'mod+n',
+        toggleTimer: 'mod+t',
+        help: 'mod+/',
+      };
+    } catch { return {}; }
+  });
 
   useEffect(() => {
     import('../../package.json')
@@ -28,7 +44,7 @@ export default function SettingsPage() {
       .catch(() => setVersion('0.0.0'));
   }, []);
 
-  const unlockedCount = achievements.filter(achievement => achievement.unlockedAt).length;
+  useEffect(() => { initSidebar(); }, [initSidebar]);
 
   const handleExport = async () => {
     try {
@@ -112,6 +128,57 @@ export default function SettingsPage() {
     await db.achievements.clear();
     setMessage('全部数据已清空');
     setTimeout(() => window.location.reload(), 1000);
+  };
+
+  const handleCSVImport = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv';
+    input.onchange = async event => {
+      try {
+        const file = (event.target as HTMLInputElement).files?.[0];
+        if (!file || !currentProjectId) return;
+        const text = await file.text();
+        const lines = text.split('\n').filter(line => line.trim());
+        if (lines.length < 2) { setMessage('CSV 至少需要标题行和数据行'); return; }
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+        let imported = 0;
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split(',').map(v => v.trim());
+          const row: Record<string, string> = {};
+          headers.forEach((h, idx) => { row[h] = values[idx] || ''; });
+          if (row.title) {
+            await addTask({
+              projectId: currentProjectId,
+              title: row.title,
+              description: row.description || '',
+              status: (['todo', 'in_progress', 'review', 'done'].includes(row.status) ? row.status : 'todo') as TaskStatus,
+              priority: (['low', 'medium', 'high', 'urgent'].includes(row.priority) ? row.priority : 'medium') as TaskPriority,
+              tags: row.tags ? row.tags.split(';').map(t => t.trim()).filter(Boolean) : [],
+              dueDate: row.due_date || row.duedate || null,
+              milestoneId: null,
+              estimatedMinutes: row.estimated_minutes ? parseInt(row.estimated_minutes) : null,
+              url: row.url || '',
+              recurrence: 'none',
+              source: 'board',
+              remindAt: null,
+              isTodayTask: false,
+              publishedAt: null,
+              subtasks: [],
+              trackedMinutes: 0,
+              dependencyIds: [],
+              dependsOn: [],
+            });
+            imported++;
+          }
+        }
+        await loadTasks(currentProjectId);
+        setMessage(`成功从 CSV 导入 ${imported} 个任务`);
+      } catch {
+        setMessage('CSV 导入失败，请检查文件格式');
+      }
+    };
+    input.click();
   };
 
   return (
@@ -238,15 +305,18 @@ export default function SettingsPage() {
               <option value={60}>60 分钟</option>
             </select>
           </label>
-          <label className="text-xs text-slate-500">每日提醒时间
-            <input type="time" value={notificationSettings.dailyReminderTime} onChange={event => updateSettings({ dailyReminderTime: event.target.value })} className="mt-1 w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white" />
-          </label>
-          <label className="text-xs text-slate-500">静默开始
-            <input type="time" value={notificationSettings.quietStart} onChange={event => updateSettings({ quietStart: event.target.value })} className="mt-1 w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white" />
-          </label>
-          <label className="text-xs text-slate-500">静默结束
-            <input type="time" value={notificationSettings.quietEnd} onChange={event => updateSettings({ quietEnd: event.target.value })} className="mt-1 w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white" />
-          </label>
+          <div>
+            <span className="mb-1 block text-xs text-slate-500">每日提醒时间</span>
+            <TimePicker value={notificationSettings.dailyReminderTime} onChange={val => updateSettings({ dailyReminderTime: val })} placeholder="提醒时间" />
+          </div>
+          <div>
+            <span className="mb-1 block text-xs text-slate-500">静默开始</span>
+            <TimePicker value={notificationSettings.quietStart} onChange={val => updateSettings({ quietStart: val })} placeholder="开始时间" />
+          </div>
+          <div>
+            <span className="mb-1 block text-xs text-slate-500">静默结束</span>
+            <TimePicker value={notificationSettings.quietEnd} onChange={val => updateSettings({ quietEnd: val })} placeholder="结束时间" />
+          </div>
         </div>
         <button
           onClick={() => updateSettings({ quietHoursEnabled: !notificationSettings.quietHoursEnabled })}
@@ -258,24 +328,56 @@ export default function SettingsPage() {
 
       <div className="glass rounded-3xl p-5">
         <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-200">
-          <Trophy size={16} className="text-amber-400" />
-          成就系统
+          <Keyboard size={16} className="text-purple-300" />
+          自定义快捷键
         </h3>
-        <div className="mb-4 text-sm text-slate-400">已解锁 {unlockedCount} / {achievements.length}</div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {achievements.map(achievement => (
-            <div
-              key={achievement.key}
-              className={`rounded-2xl p-4 ${
-                achievement.unlockedAt ? 'border border-amber-500/10 bg-amber-500/5' : 'bg-white/[0.02] opacity-60'
+        <p className="mb-4 text-xs text-slate-500">修改常用操作的快捷键组合，支持 mod（Cmd/Ctrl）、shift、alt。</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {Object.entries(shortcuts).map(([key, value]) => (
+            <div key={key} className="flex items-center justify-between gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
+              <span className="text-sm text-slate-300">
+                {key === 'commandPalette' ? '命令面板' : key === 'newTask' ? '新建任务' : key === 'toggleTimer' ? '切换计时器' : '快捷键帮助'}
+              </span>
+              <input
+                value={value as string}
+                onChange={e => {
+                  const next = { ...shortcuts, [key]: e.target.value };
+                  setShortcuts(next);
+                  localStorage.setItem('devtrack-shortcuts', JSON.stringify(next));
+                }}
+                placeholder="mod+k"
+                className="w-28 rounded-xl border border-white/[0.06] bg-white/[0.03] px-2 py-1 text-center text-xs text-white font-mono focus:border-sky-500/50 focus:outline-none"
+              />
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-[10px] text-slate-600">修改即时生效，刷新页面后仍然保留。</p>
+      </div>
+
+      <div className="glass rounded-3xl p-5">
+        <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <Eye size={16} className="text-cyan-300" />
+          侧边栏显示
+        </h3>
+        <p className="mb-4 text-xs text-slate-500">勾选你想在左侧导航栏显示的项目。</p>
+        <div className="mb-3 flex gap-2">
+          <button onClick={hideAll} className="rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/[0.06]">全部隐藏</button>
+          <button onClick={showAll} className="rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/[0.06]">全部启用</button>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {sidebarItems.map(item => (
+            <button
+              key={item.to}
+              onClick={() => toggleSidebarItem(item.to)}
+              className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs text-left transition ${
+                item.visible
+                  ? 'border-sky-500/20 bg-sky-500/10 text-sky-200'
+                  : 'border-white/[0.04] bg-white/[0.01] text-slate-600 line-through'
               }`}
             >
-              <div className="mb-1 text-xl">{achievement.icon}</div>
-              <p className={`text-sm font-medium ${achievement.unlockedAt ? 'text-amber-300' : 'text-slate-400'}`}>
-                {achievement.title}
-              </p>
-              <p className="mt-1 text-xs text-slate-500">{achievement.description}</p>
-            </div>
+              <div className={`h-2 w-2 rounded-full ${item.visible ? 'bg-sky-400' : 'bg-slate-600'}`} />
+              {item.label}
+            </button>
           ))}
         </div>
       </div>

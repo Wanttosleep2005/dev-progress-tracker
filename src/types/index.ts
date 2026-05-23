@@ -36,6 +36,12 @@ export interface Project {
   updatedAt: string;
 }
 
+export interface Subtask {
+  id: string;
+  title: string;
+  done: boolean;
+}
+
 export interface Task {
   id?: number;
   projectId: number;
@@ -58,6 +64,10 @@ export interface Task {
   assigneeId?: string | null;
   dependencyIds?: number[];
   dependsOn?: number[];
+  subtasks?: Subtask[];
+  trackedMinutes?: number;
+  pomodoroGoal?: number | null;
+  sprintId?: number | null;
   createdBy?: string | null;
   updatedBy?: string | null;
   remoteId?: string | null;
@@ -122,13 +132,37 @@ export interface DiaryEntry {
   updatedAt: string;
 }
 
+export type AchievementLevel = 'bronze' | 'silver' | 'gold';
+
 export interface Achievement {
   id?: number;
   key: string;
   title: string;
   description: string;
   icon: string;
+  level: AchievementLevel;
   unlockedAt: string | null;
+}
+
+export interface Sprint {
+  id?: number;
+  projectId: number;
+  name: string;
+  goal: string;
+  status: 'planning' | 'active' | 'completed';
+  startDate: string;
+  endDate: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskComment {
+  id?: number;
+  taskId: number;
+  userId: string;
+  userName: string;
+  content: string;
+  createdAt: string;
 }
 
 export interface User {
@@ -272,6 +306,12 @@ export interface AICommandAction {
   plannedStartAt: string;
   plannedEndAt: string;
   relatedTaskId: string;
+  /** v0.6.0: 子任务清单 */
+  subtasks?: { id: string; title: string; done: boolean }[];
+  /** v0.6.0: 实际追踪耗时（分钟） */
+  trackedMinutes?: number;
+  /** v0.6.0: 关联冲刺ID */
+  sprintId?: string;
 }
 
 export interface AICommandPlan {
@@ -294,14 +334,35 @@ export interface Notification {
 }
 
 export const ACHIEVEMENTS: Omit<Achievement, 'id' | 'unlockedAt'>[] = [
-  { key: 'first_project', title: '启航', description: '创建第一个项目', icon: '🚀' },
-  { key: 'first_task', title: '开始行动', description: '创建第一个任务', icon: '✅' },
-  { key: 'first_done', title: '首次完成', description: '完成第一个任务', icon: '🏁' },
-  { key: 'first_log', title: '记录者', description: '写下第一篇开发日志', icon: '📝' },
-  { key: 'first_milestone', title: '里程碑达成', description: '完成第一个里程碑', icon: '🎯' },
-  { key: 'ten_tasks', title: '高效执行', description: '累计完成 10 个任务', icon: '💯' },
-  { key: 'all_priority', title: '全能选手', description: '处理过所有优先级的任务', icon: '🧠' },
-  { key: 'streak_7', title: '稳定输出', description: '连续 7 天留下工作记录', icon: '🔥' },
+  { key: 'first_project', title: '启航', description: '创建第一个项目', icon: '🚀', level: 'bronze' },
+  { key: 'first_task', title: '开始行动', description: '创建第一个任务', icon: '✅', level: 'bronze' },
+  { key: 'first_done', title: '首次完成', description: '完成第一个任务', icon: '🏁', level: 'bronze' },
+  { key: 'first_log', title: '记录者', description: '写下第一篇开发日志', icon: '📝', level: 'bronze' },
+  { key: 'first_milestone', title: '里程碑达成', description: '完成第一个里程碑', icon: '🎯', level: 'bronze' },
+  { key: 'ten_tasks', title: '高效执行', description: '累计完成 10 个任务', icon: '💯', level: 'bronze' },
+  { key: 'all_priority', title: '全能选手', description: '处理过所有优先级的任务', icon: '🧠', level: 'bronze' },
+  { key: 'streak_7', title: '稳定输出', description: '连续 7 天留下工作记录', icon: '🔥', level: 'bronze' },
+  // Silver tier
+  { key: 'streak_30', title: '连击大师', description: '连续 30 天打卡日记', icon: '🔥', level: 'silver' },
+  { key: 'fifty_tasks', title: '批量交付', description: '累计完成 50 个任务', icon: '📦', level: 'silver' },
+  { key: 'focus_50h', title: '深度修行', description: '累计专注 50 小时', icon: '🧘', level: 'silver' },
+  { key: 'three_projects', title: '多面手', description: '同时管理 3 个活跃项目', icon: '🎯', level: 'silver' },
+  { key: 'five_milestones', title: '里程碑收割机', description: '完成 5 个里程碑', icon: '🏆', level: 'silver' },
+  { key: 'all_tags', title: '标签大师', description: '使用过 10 种不同的标签', icon: '🏷️', level: 'silver' },
+  { key: 'est_accurate', title: '预估精准', description: '10 个任务实际工时在预估的 ±20% 内', icon: '🎯', level: 'silver' },
+  { key: 'sprint_master', title: '冲刺达人', description: '完成第一个 Sprint', icon: '⚡', level: 'silver' },
+  // Gold tier
+  { key: 'streak_60', title: '连击王者', description: '连续 60 天打卡日记', icon: '👑', level: 'gold' },
+  { key: 'hundred_tasks', title: '百战老将', description: '累计完成 100 个任务', icon: '💎', level: 'gold' },
+  { key: 'focus_200h', title: '专注大师', description: '累计专注 200 小时', icon: '🧠', level: 'gold' },
+  { key: 'five_projects', title: '项目将军', description: '同时管理 5 个活跃项目', icon: '🎖️', level: 'gold' },
+  { key: 'twenty_milestones', title: '里程碑征服者', description: '完成 20 个里程碑', icon: '👑', level: 'gold' },
+  { key: 'midnight_coder', title: '凌晨战神', description: '凌晨 0-5 点完成 20 个任务', icon: '🌙', level: 'gold' },
+  { key: 'no_overdue_30', title: '零 Bug 传说', description: '连续 30 天无逾期任务', icon: '🛡️', level: 'gold' },
+  { key: 'super_planner', title: '规划大师', description: '20 个任务都关联了里程碑', icon: '📋', level: 'gold' },
+  { key: 'diary_100', title: '百篇日志', description: '累计写满 100 篇开发日志', icon: '📚', level: 'gold' },
+  { key: 'collab_team', title: '团队核心', description: '邀请 3 位成员加入协作', icon: '🤝', level: 'gold' },
+  { key: 'task_deps', title: '依赖管理者', description: '创建 10 条任务依赖关系', icon: '🔗', level: 'gold' },
 ];
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
@@ -374,6 +435,24 @@ export const RECURRENCE_LABELS: Record<RecurrenceRule, string> = {
   daily: '每天',
   weekly: '每周',
   monthly: '每月',
+};
+
+export const ACHIEVEMENT_LEVEL_LABELS: Record<AchievementLevel, string> = {
+  bronze: '🥉 铜',
+  silver: '🥈 银',
+  gold: '🥇 金',
+};
+
+export const ACHIEVEMENT_LEVEL_COLORS: Record<AchievementLevel, string> = {
+  bronze: '#cd7f32',
+  silver: '#c0c0c0',
+  gold: '#ffd700',
+};
+
+export const SPRINT_STATUS_LABELS: Record<Sprint['status'], string> = {
+  planning: '规划中',
+  active: '进行中',
+  completed: '已完成',
 };
 
 export const MILESTONE_STATUS_LABELS: Record<MilestoneStatus, string> = {

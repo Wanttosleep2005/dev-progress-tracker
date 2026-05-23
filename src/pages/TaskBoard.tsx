@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type DragEvent as ReactDragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type DragEvent as ReactDragEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Calendar,
@@ -9,9 +9,11 @@ import {
   Link as LinkIcon,
   List,
   Lock,
+  Pause,
   Plus,
   RefreshCw,
   Search,
+  Square,
   SquarePen,
   Timer as TimerIcon,
   Trash2,
@@ -21,8 +23,10 @@ import { useAppStore } from '../stores/useAppStore';
 import { useMilestoneStore } from '../stores/useMilestoneStore';
 import { useTaskStore } from '../stores/useTaskStore';
 import { useCloudStore } from '../stores/useCloudStore';
+import { useTaskTimerStore } from '../stores/useTaskTimerStore';
 import { PRIORITY_COLORS, PRIORITY_LABELS, RECURRENCE_LABELS, STATUS_LABELS, TASK_TEMPLATES } from '../types';
-import type { RecurrenceRule, Task, TaskPriority, TaskStatus, ViewMode } from '../types';
+import type { RecurrenceRule, Subtask, Task, TaskPriority, TaskStatus, ViewMode } from '../types';
+import SubtaskList from '../components/SubtaskList';
 import { getTaskActualMinutes } from '../lib/reporting';
 import { startFocusTimer } from '../components/FocusTimer';
 import SelectField from '../components/ui/SelectField';
@@ -227,15 +231,18 @@ export default function TaskBoard() {
             {task.description && <p className="mt-1 line-clamp-2 text-xs text-slate-500">{task.description}</p>}
           </div>
           {!batchMode && (
-            <button
-              onClick={event => {
-                event.stopPropagation();
-                if (task.id) remove(task.id);
-              }}
-              className="rounded-lg p-1 opacity-0 transition group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-400"
-            >
-              <X size={12} />
-            </button>
+            <div className="flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
+              <TaskTimerButton taskId={task.id!} taskTitle={task.title} />
+              <button
+                onClick={event => {
+                  event.stopPropagation();
+                  if (task.id) remove(task.id);
+                }}
+                className="rounded-lg p-1 hover:bg-red-500/10 hover:text-red-400"
+              >
+                <X size={12} />
+              </button>
+            </div>
           )}
         </div>
 
@@ -267,7 +274,20 @@ export default function TaskBoard() {
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-500">
+        {/* Subtask progress */}
+        {(task.subtasks?.length ?? 0) > 0 && (
+          <div className="mb-2">
+            <div className="mb-1 flex items-center justify-between text-[10px]">
+              <span className="text-slate-500">子任务</span>
+              <span className="text-slate-400">{task.subtasks!.filter(s => s.done).length}/{task.subtasks!.length}</span>
+            </div>
+            <div className="h-1 overflow-hidden rounded-full bg-white/[0.04]">
+              <div className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-500" style={{ width: `${task.subtasks!.length > 0 ? Math.round((task.subtasks!.filter(s => s.done).length / task.subtasks!.length) * 100) : 0}%` }} />
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-500">
           <div className="rounded-xl bg-white/[0.03] px-3 py-2">
             <div className="mb-1 flex items-center gap-1 text-slate-400">
               <Clock3 size={12} />
@@ -281,6 +301,13 @@ export default function TaskBoard() {
               实际
             </div>
             <span className="font-medium text-white">{formatDurationFromMinutes(actualMinutes)}</span>
+          </div>
+          <div className="rounded-xl bg-white/[0.03] px-3 py-2">
+            <div className="mb-1 flex items-center gap-1 text-slate-400">
+              <TimerIcon size={12} />
+              追踪
+            </div>
+            <span className="font-medium text-emerald-300">{formatDurationFromMinutes(task.trackedMinutes ?? 0)}</span>
           </div>
         </div>
 
@@ -301,6 +328,74 @@ export default function TaskBoard() {
       </motion.div>
     );
   };
+
+  function TaskTimerButton({ taskId, taskTitle }: { taskId: number; taskTitle: string }) {
+    const timer = useTaskTimerStore();
+    const isThisTask = timer.taskId === taskId && timer.isRunning;
+    
+    const handleClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (isThisTask) {
+        timer.pause();
+      } else {
+        timer.start(taskId, taskTitle);
+      }
+    };
+    
+    return (
+      <button onClick={handleClick} className={`rounded-lg p-1 transition ${isThisTask ? 'bg-red-500/10 text-red-400' : 'hover:bg-emerald-500/10 hover:text-emerald-400'}`} title={isThisTask ? '暂停计时' : '开始计时'}>
+        {isThisTask ? <Pause size={12} /> : <TimerIcon size={12} />}
+      </button>
+    );
+  }
+
+  function FloatingTaskTimer() {
+    const { taskId, taskTitle, isRunning, accumulatedSeconds, pause, stop } = useTaskTimerStore();
+    const { update } = useTaskStore();
+    
+    useEffect(() => {
+      if (!isRunning) return;
+      const interval = setInterval(() => {
+        useTaskTimerStore.getState().tick();
+      }, 1000);
+      return () => clearInterval(interval);
+    }, [isRunning]);
+
+    const handleStop = async () => {
+      const minutes = Math.ceil(useTaskTimerStore.getState().stop() / 60);
+      if (taskId && minutes > 0) {
+        const task = useTaskStore.getState().tasks.find(t => t.id === taskId);
+        if (task) {
+          await update(taskId, { trackedMinutes: (task.trackedMinutes || 0) + minutes });
+        }
+      }
+    };
+
+    if (!taskId || !isRunning) return null;
+
+    const hours = Math.floor(accumulatedSeconds / 3600);
+    const mins = Math.floor((accumulatedSeconds % 3600) / 60);
+    const secs = accumulatedSeconds % 60;
+    const timeStr = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20, scale: 0.9 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-2xl border border-emerald-500/20 bg-[#0b1424]/95 backdrop-blur p-3 shadow-2xl"
+      >
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10">
+          <div className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+        </div>
+        <div className="min-w-0 max-w-[180px]">
+          <p className="truncate text-xs font-medium text-white">{taskTitle}</p>
+          <p className="font-mono text-lg font-bold text-emerald-300 tracking-wider">{timeStr}</p>
+        </div>
+        <button onClick={pause} className="rounded-lg p-1.5 text-amber-400 hover:bg-amber-500/10"><Pause size={14} /></button>
+        <button onClick={handleStop} className="rounded-lg p-1.5 text-red-400 hover:bg-red-500/10"><Square size={14} /></button>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex min-h-0 flex-1 flex-col gap-5">
@@ -626,6 +721,14 @@ export default function TaskBoard() {
                     </div>
                   </div>
                 </div>
+
+                {/* Subtasks */}
+                <div className="lg:col-span-2">
+                  <SubtaskList 
+                    subtasks={editingTask.subtasks || []} 
+                    onChange={(subtasks: Subtask[]) => setEditingTask({ ...editingTask, subtasks })} 
+                  />
+                </div>
               </div>
 
               <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -656,6 +759,8 @@ export default function TaskBoard() {
                           recurrence: editingTask.recurrence ?? 'none',
                           dependsOn: getTaskDependencyIds(editingTask),
                           dependencyIds: getTaskDependencyIds(editingTask),
+                          subtasks: editingTask.subtasks,
+                          trackedMinutes: editingTask.trackedMinutes,
                         });
                         if (currentProjectId) {
                           await refresh(currentProjectId);
@@ -674,6 +779,7 @@ export default function TaskBoard() {
           </motion.div>
         )}
       </AnimatePresence>
+      <FloatingTaskTimer />
     </motion.div>
   );
 }

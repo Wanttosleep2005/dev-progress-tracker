@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -32,8 +32,9 @@ import PersonalStats from '../components/PersonalStats';
 import RiskPanel from '../components/RiskPanel';
 import TodayFocus from '../components/TodayFocus';
 import WeeklyRhythm from '../components/WeeklyRhythm';
-import { EVENT_TYPE_LABELS, MILESTONE_STATUS_LABELS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS } from '../types';
-import type { Milestone, Task, TaskStatus } from '../types';
+import { ACHIEVEMENTS, EVENT_TYPE_LABELS, MILESTONE_STATUS_LABELS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS } from '../types';
+import type { Achievement, Milestone, Task, TaskStatus } from '../types';
+import AchievementUnlockModal from '../components/AchievementUnlockModal';
 import { analyzeProjectRisk } from '../lib/riskAnalysis';
 import { formatDateTime } from '../lib/duration';
 
@@ -122,6 +123,20 @@ export default function Overview() {
   const sessions = useStatsStore(state => state.sessions);
   const [actionPage, setActionPage] = useState(1);
   const [milestonePage, setMilestonePage] = useState(1);
+  const [showAchievement, setShowAchievement] = useState<Achievement | null>(null);
+  const prevUnlockedKeys = useRef(unlockedAchievements.map(a => a.key).join(','));
+
+  useEffect(() => {
+    const currentKeys = unlockedAchievements.map(a => a.key).join(',');
+    if (prevUnlockedKeys.current && currentKeys !== prevUnlockedKeys.current) {
+      const prevKeys = new Set(prevUnlockedKeys.current.split(','));
+      const newUnlocked = unlockedAchievements.find(a => !prevKeys.has(a.key));
+      if (newUnlocked) {
+        setShowAchievement(newUnlocked);
+      }
+    }
+    prevUnlockedKeys.current = currentKeys;
+  }, [unlockedAchievements]);
 
   useEffect(() => {
     useStatsStore.getState().loadSessions();
@@ -294,18 +309,24 @@ export default function Overview() {
         </motion.div>
       )}
 
-      {unlockedAchievements.length > 0 && (
-        <motion.div variants={item} className="flex gap-2 overflow-x-auto pb-1">
-          {unlockedAchievements.slice(-4).map(achievement => (
-            <div key={achievement.key} className="shrink-0 rounded-2xl border border-amber-500/15 bg-amber-500/10 px-3 py-2">
-              <div className="flex items-center gap-2">
-                <span className="text-sm">{achievement.icon}</span>
-                <span className="text-xs font-medium text-amber-300">{achievement.title}</span>
-              </div>
+      {/* 成就进度 */}
+      <motion.div variants={item}>
+        <button onClick={() => navigate('/achievements')} className="glass w-full rounded-[28px] p-5 text-left transition hover:bg-white/[0.05]">
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10">
+              <Trophy size={22} className="text-amber-400" />
             </div>
-          ))}
-        </motion.div>
-      )}
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-white">成就进度</h3>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/[0.04]">
+                <div className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-400" style={{ width: `${Math.round((unlockedAchievements.length / ACHIEVEMENTS.length) * 100)}%` }} />
+              </div>
+              <p className="mt-1 text-xs text-slate-500">{unlockedAchievements.length} / {ACHIEVEMENTS.length} 已解锁</p>
+            </div>
+            <span className="text-slate-600">→</span>
+          </div>
+        </button>
+      </motion.div>
 
       <motion.div variants={item} className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_320px]">
         <TodayFocus />
@@ -537,10 +558,12 @@ export default function Overview() {
           </div>
           <div>
             <p className="text-xs text-slate-500">成就进度</p>
-            <p className="text-lg font-bold text-white">{unlockedAchievements.length} <span className="text-sm font-normal text-slate-500">/ {achievements.length}</span></p>
+            <p className="text-lg font-bold text-white">{unlockedAchievements.length} <span className="text-sm font-normal text-slate-500">/ {ACHIEVEMENTS.length}</span></p>
           </div>
         </button>
       </motion.div>
+
+      <AchievementUnlockModal achievement={showAchievement} onClose={() => setShowAchievement(null)} />
     </motion.div>
   );
 }

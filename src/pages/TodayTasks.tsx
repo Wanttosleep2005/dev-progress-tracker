@@ -7,6 +7,7 @@ import { PRIORITY_LABELS, RECURRENCE_LABELS, STATUS_LABELS } from '../types';
 import type { RecurrenceRule, TaskPriority } from '../types';
 import { useToast } from '../stores/useToast';
 import { formatDateTime } from '../lib/duration';
+import TimePicker from '../components/ui/TimePicker';
 
 function formatCountdown(target: string | null) {
   if (!target) return '未设置截止时间';
@@ -136,40 +137,52 @@ export default function TodayTasks() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <input
-            value={title}
-            onChange={event => setTitle(event.target.value)}
-            placeholder="任务标题"
-            className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none xl:col-span-2"
-          />
-          <input
-            value={description}
-            onChange={event => setDescription(event.target.value)}
-            placeholder="任务说明"
-            className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none xl:col-span-2"
-          />
-          <select
-            value={priority}
-            onChange={event => setPriority(event.target.value as TaskPriority)}
-            className="rounded-xl border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-sm text-white focus:border-sky-500/50 focus:outline-none"
-          >
-            {(['low', 'medium', 'high', 'urgent'] as TaskPriority[]).map(item => (
-              <option key={item} value={item}>
-                {PRIORITY_LABELS[item]}
-              </option>
-            ))}
-          </select>
-          <input
-            type="number"
-            min="0"
-            step="5"
-            value={estimatedMinutes}
-            onChange={event => setEstimatedMinutes(event.target.value)}
-            placeholder="预估工时（分钟）"
-            className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none"
-          />
+          <div className="xl:col-span-2">
+            <label className="mb-1 block text-[10px] text-slate-500">任务标题</label>
+            <input
+              value={title}
+              onChange={event => setTitle(event.target.value)}
+              placeholder="任务标题"
+              className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none"
+            />
+          </div>
+          <div className="xl:col-span-2">
+            <label className="mb-1 block text-[10px] text-slate-500">任务说明</label>
+            <input
+              value={description}
+              onChange={event => setDescription(event.target.value)}
+              placeholder="任务说明"
+              className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[10px] text-slate-500">优先级</label>
+            <select
+              value={priority}
+              onChange={event => setPriority(event.target.value as TaskPriority)}
+              className="w-full rounded-xl border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-sm text-white focus:border-sky-500/50 focus:outline-none"
+            >
+              {(['low', 'medium', 'high', 'urgent'] as TaskPriority[]).map(item => (
+                <option key={item} value={item}>
+                  {PRIORITY_LABELS[item]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[10px] text-slate-500">预估工时（分钟）</label>
+            <input
+              type="number"
+              min="0"
+              step="5"
+              value={estimatedMinutes}
+              onChange={event => setEstimatedMinutes(event.target.value)}
+              placeholder="预估工时（分钟）"
+              className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none"
+            />
+          </div>
           <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2">
-            <label className="mb-1 block text-[11px] text-slate-500">截止时间</label>
+            <label className="mb-1 block text-[10px] text-slate-500">截止时间</label>
             <input
               type="datetime-local"
               value={dueAt}
@@ -177,27 +190,30 @@ export default function TodayTasks() {
               className="w-full bg-transparent text-sm text-white focus:outline-none"
             />
           </div>
-          <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2">
-            <label className="mb-1 block text-[11px] text-slate-500">提醒时间</label>
+          <div>
+            <label className="mb-1 block text-[10px] text-slate-500">提醒时间</label>
+            <TimePicker value={remindAt} onChange={setRemindAt} placeholder="提醒时间" />
+          </div>
+          <div className="xl:col-span-2">
+            <label className="mb-1 block text-[10px] text-slate-500">标签</label>
             <input
-              type="datetime-local"
-              value={remindAt}
-              onChange={event => setRemindAt(event.target.value)}
-              className="w-full bg-transparent text-sm text-white focus:outline-none"
+              value={tags}
+              onChange={event => setTags(event.target.value)}
+              placeholder="标签，用逗号分隔"
+              className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none"
             />
           </div>
-          <input
-            value={tags}
-            onChange={event => setTags(event.target.value)}
-            placeholder="标签，用逗号分隔"
-            className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none xl:col-span-2"
-          />
-          <select value={recurrence} onChange={event => setRecurrence(event.target.value as RecurrenceRule)} className="custom-select rounded-xl border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-sm text-white focus:border-sky-500/50 focus:outline-none">
-            {Object.entries(RECURRENCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-          <button onClick={handlePublish} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600">
-            发布任务
-          </button>
+          <div>
+            <label className="mb-1 block text-[10px] text-slate-500">重复规则</label>
+            <select value={recurrence} onChange={event => setRecurrence(event.target.value as RecurrenceRule)} className="custom-select w-full rounded-xl border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-sm text-white focus:border-sky-500/50 focus:outline-none">
+              {Object.entries(RECURRENCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <button onClick={handlePublish} className="w-full rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600">
+              发布任务
+            </button>
+          </div>
         </div>
       </div>
 

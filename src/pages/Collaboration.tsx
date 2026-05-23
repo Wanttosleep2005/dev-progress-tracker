@@ -87,6 +87,50 @@ export default function Collaboration() {
 
       {error && <div className="glass rounded-2xl border border-amber-500/20 p-3 text-sm text-amber-200">{error}</div>}
 
+      {session && (
+        <div className="glass rounded-[28px] p-5">
+          <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-200">📊 团队仪表盘</h3>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+              <p className="text-[11px] text-slate-500">团队成员</p>
+              <p className="mt-1 text-2xl font-bold text-sky-300">{members.length}</p>
+            </div>
+            <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+              <p className="text-[11px] text-slate-500">协作事件</p>
+              <p className="mt-1 text-2xl font-bold text-amber-300">{events.length}</p>
+            </div>
+            <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+              <p className="text-[11px] text-slate-500">同步状态</p>
+              <p className="mt-1 text-lg font-bold text-violet-300">{syncLabels[syncState.syncStatus]}</p>
+            </div>
+            <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+              <p className="text-[11px] text-slate-500">角色</p>
+              <p className="mt-1 text-lg font-bold text-emerald-300">{isOwner ? '所有者' : currentRole === 'editor' ? '编辑者' : currentRole === 'viewer' ? '查看者' : '-'}</p>
+            </div>
+          </div>
+          {members.length > 0 && (
+            <div className="mt-4">
+              <h4 className="mb-3 flex items-center gap-2 text-xs font-medium text-slate-400"><Users size={14} /> 成员活跃概览</h4>
+              <div className="space-y-2">
+                {members.map(member => (
+                  <div key={member.userId} className="flex items-center gap-3 rounded-2xl border border-white/[0.04] bg-white/[0.01] p-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-500/10 text-sm font-bold text-sky-300">
+                      {(member.displayName || member.email || '?')[0].toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-white">{member.displayName || member.email}</p>
+                      <p className="text-[10px] text-slate-500">{roleLabels[member.role]}{member.online ? ' · 在线' : ''}</p>
+                    </div>
+                    {isMe(member) && <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-300">我</span>}
+                    <span className={`h-2 w-2 rounded-full ${member.online ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="glass rounded-[30px] p-5">
           <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-200">

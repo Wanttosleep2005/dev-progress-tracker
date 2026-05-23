@@ -14,9 +14,12 @@ const Timeline = lazy(() => import('./pages/Timeline'));
 const Diary = lazy(() => import('./pages/Diary'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Gantt = lazy(() => import('./pages/Gantt'));
+const Calendar = lazy(() => import('./pages/Calendar'));
+const Sprints = lazy(() => import('./pages/Sprints'));
 const Collaboration = lazy(() => import('./pages/Collaboration'));
 const AICommandCenter = lazy(() => import('./pages/AICommandCenter'));
 const Projects = lazy(() => import('./pages/Projects'));
+const Achievements = lazy(() => import('./pages/Achievements'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
 const Invite = lazy(() => import('./pages/Invite'));
 
@@ -48,9 +51,12 @@ export default function App() {
             <Route path="diary" element={<Diary />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="gantt" element={<Gantt />} />
+            <Route path="calendar" element={<Calendar />} />
+            <Route path="sprints" element={<Sprints />} />
             <Route path="collaboration" element={<Collaboration />} />
             <Route path="ai-command" element={<AICommandCenter />} />
             <Route path="projects" element={<Projects />} />
+            <Route path="achievements" element={<Achievements />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="invite/:token" element={<Invite />} />
           </Route>
