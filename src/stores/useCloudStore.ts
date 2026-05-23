@@ -22,6 +22,7 @@ import {
   type CloudSession,
 } from '../lib/cloudSync';
 import { useAppStore } from './useAppStore';
+import { useNotificationCenterStore } from './useNotificationCenterStore';
 
 interface CloudStore {
   session: CloudSession | null;
@@ -41,6 +42,7 @@ interface CloudStore {
   inviteByEmail: (projectId: number, email: string, role: TeamMember['role']) => Promise<void>;
   updateMemberRole: (memberId: number, role: TeamMember['role']) => Promise<void>;
   removeMember: (memberId: number) => Promise<void>;
+  transferOwnership: (projectId: number, targetMemberId: number) => Promise<void>;
   createInviteLink: (projectId: number, role: TeamMember['role']) => Promise<void>;
   publishProject: (projectId: number) => Promise<void>;
   joinProject: (remoteProjectId: string, role: TeamMember['role']) => Promise<void>;
@@ -194,6 +196,7 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
       description: `${email} 被邀请为 ${role}`,
     });
     await get().loadTeam(projectId);
+    await useNotificationCenterStore.getState().add('member_joined', '新成员加入', `${email} 被邀请加入项目`, '/collaboration', projectId);
   },
 
   updateMemberRole: async (memberId, role) => {
@@ -230,6 +233,41 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
     if (member) await get().loadTeam(member.projectId);
   },
 
+  transferOwnership: async (projectId, targetMemberId) => {
+    const me = get().user;
+    if (!me) return;
+    const project = await db.projects.get(projectId);
+    const session = get().session;
+    // 找到当前用户的 member 记录
+    const myMember = get().members.find(m =>
+      m.projectId === projectId &&
+      (m.userId === me.id || m.email === me.email || m.userId === `email:${me.email}`)
+    );
+    const targetMember = await db.teamMembers.get(targetMemberId);
+    if (!myMember?.id || !targetMember) return;
+    // 修改目标成员为 owner
+    await db.teamMembers.update(targetMemberId, { role: 'owner' });
+    if (session && project?.remoteProjectId) {
+      await updateRemoteMemberRole(session, project.remoteProjectId, targetMember.userId, 'owner');
+    }
+    // 修改自己为 editor
+    await db.teamMembers.update(myMember.id, { role: 'editor' });
+    if (session && project?.remoteProjectId) {
+      await updateRemoteMemberRole(session, project.remoteProjectId, myMember.userId, 'editor');
+    }
+    await recordCollaborationEvent({
+      projectId,
+      userId: me.id,
+      userName: me.displayName,
+      type: 'member_role_changed',
+      targetType: 'members',
+      targetId: targetMember.userId,
+      title: '转让项目所有权',
+      description: `${me.displayName} 将所有权转让给 ${targetMember.displayName || targetMember.email || targetMember.userId}`,
+    });
+    await get().loadTeam(projectId);
+  },
+
   createInviteLink: async (projectId, role) => {
     const project = await db.projects.get(projectId);
     set({ inviteUrl: project?.remoteProjectId ? buildRemoteInviteUrl(project.remoteProjectId, role) : buildInviteUrl(projectId, role) });
@@ -248,6 +286,7 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
       await useAppStore.getState().loadProjects();
       await get().loadTeam(projectId);
       await get().syncNow();
+      await useNotificationCenterStore.getState().add('project_shared', '项目已发布', `「${project.name}」已发布为共享项目`, '/collaboration', projectId);
       set({ loading: false });
     } catch (error) {
       set({ loading: false, error: error instanceof Error ? error.message : '发布共享项目失败' });

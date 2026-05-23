@@ -3,8 +3,8 @@ import { motion } from 'framer-motion';
 import { AlarmClock, CalendarClock, ClipboardPlus, ListTodo, Megaphone, TimerReset, Trash2 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { useTaskStore } from '../stores/useTaskStore';
-import { PRIORITY_LABELS, STATUS_LABELS } from '../types';
-import type { TaskPriority } from '../types';
+import { PRIORITY_LABELS, RECURRENCE_LABELS, STATUS_LABELS } from '../types';
+import type { RecurrenceRule, TaskPriority } from '../types';
 import { useToast } from '../stores/useToast';
 import { formatDateTime } from '../lib/duration';
 
@@ -37,6 +37,7 @@ export default function TodayTasks() {
   const [priority, setPriority] = useState<TaskPriority>('high');
   const [estimatedMinutes, setEstimatedMinutes] = useState('60');
   const [tags, setTags] = useState('');
+  const [recurrence, setRecurrence] = useState<RecurrenceRule>('none');
 
   const todayTasks = useMemo(
     () =>
@@ -75,6 +76,7 @@ export default function TodayTasks() {
       milestoneId: null,
       estimatedMinutes: estimatedMinutes ? parseInt(estimatedMinutes) || null : null,
       url: '',
+      recurrence,
       source: 'daily',
       remindAt: remindAt || null,
       isTodayTask: true,
@@ -87,6 +89,7 @@ export default function TodayTasks() {
     setRemindAt('');
     setEstimatedMinutes('60');
     setTags('');
+    setRecurrence('none');
     setPriority('high');
   };
 
@@ -187,8 +190,11 @@ export default function TodayTasks() {
             value={tags}
             onChange={event => setTags(event.target.value)}
             placeholder="标签，用逗号分隔"
-            className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none xl:col-span-3"
+            className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none xl:col-span-2"
           />
+          <select value={recurrence} onChange={event => setRecurrence(event.target.value as RecurrenceRule)} className="custom-select rounded-xl border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-sm text-white focus:border-sky-500/50 focus:outline-none">
+            {Object.entries(RECURRENCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
           <button onClick={handlePublish} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600">
             发布任务
           </button>

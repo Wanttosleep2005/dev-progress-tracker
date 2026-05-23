@@ -1,4 +1,5 @@
 export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done';
+export type RecurrenceRule = 'none' | 'daily' | 'weekly' | 'monthly';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type EventType = 'release' | 'bugfix' | 'milestone' | 'decision' | 'other';
 export type MoodType = 'great' | 'good' | 'meh' | 'bad' | 'terrible';
@@ -49,6 +50,7 @@ export interface Task {
   milestoneId: number | null;
   estimatedMinutes: number | null;
   url: string;
+  recurrence: RecurrenceRule;
   source: TaskSource;
   remindAt: string | null;
   isTodayTask: boolean;
@@ -278,6 +280,19 @@ export interface AICommandPlan {
   actions: AICommandAction[];
 }
 
+export type NotificationType = 'task_due' | 'task_overdue' | 'member_joined' | 'member_role' | 'milestone_done' | 'project_shared' | 'comment';
+
+export interface Notification {
+  id?: number;
+  title: string;
+  description: string;
+  type: NotificationType;
+  read: boolean;
+  targetUrl: string;
+  projectId: number | null;
+  createdAt: string;
+}
+
 export const ACHIEVEMENTS: Omit<Achievement, 'id' | 'unlockedAt'>[] = [
   { key: 'first_project', title: '启航', description: '创建第一个项目', icon: '🚀' },
   { key: 'first_task', title: '开始行动', description: '创建第一个任务', icon: '✅' },
@@ -353,6 +368,13 @@ export const PROJECT_COLORS = [
 ];
 
 export const PROJECT_ICONS = ['📌', '🎯', '🛠️', '📦', '🧪', '🎨', '📈', '🗂️', '✍️', '📣'];
+
+export const RECURRENCE_LABELS: Record<RecurrenceRule, string> = {
+  none: '不循环',
+  daily: '每天',
+  weekly: '每周',
+  monthly: '每月',
+};
 
 export const MILESTONE_STATUS_LABELS: Record<MilestoneStatus, string> = {
   upcoming: '未开始',

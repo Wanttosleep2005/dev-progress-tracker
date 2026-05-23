@@ -5,6 +5,7 @@ import { Copy as CopyIcon, Download, Plus, Trash2, Upload } from 'lucide-react';
 import { db, cloneProject } from '../db/database';
 import { useAppStore } from '../stores/useAppStore';
 import { PROJECT_COLORS, PROJECT_ICONS } from '../types';
+import { applyTemplate, PROJECT_TEMPLATES } from '../lib/templates';
 
 export default function Projects() {
   const { projects, addProject, deleteProject, setCurrentProject, achievements, loadProjects } = useAppStore();
@@ -14,11 +15,12 @@ export default function Projects() {
   const [color, setColor] = useState(PROJECT_COLORS[0]);
   const [icon, setIcon] = useState(PROJECT_ICONS[0]);
   const [deadline, setDeadline] = useState('');
+  const [templateId, setTemplateId] = useState('');
   const navigate = useNavigate();
 
   const handleAdd = async () => {
     if (!name.trim()) return;
-    await addProject({
+    const id = await addProject({
       name: name.trim(),
       description: description.trim(),
       color,
@@ -26,8 +28,13 @@ export default function Projects() {
       status: 'active',
       deadline: deadline || null,
     });
+    if (templateId && id) {
+      await applyTemplate(templateId, id);
+      await loadProjects();
+    }
     setName('');
     setDescription('');
+    setTemplateId('');
     setShowAdd(false);
     setDeadline('');
   };
@@ -166,6 +173,29 @@ export default function Projects() {
           <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} onClick={event => event.stopPropagation()} className="glass glow w-full max-w-md p-6">
             <h3 className="mb-4 text-lg font-bold text-white">创建新项目</h3>
             <div className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-slate-400">模板（可选）</label>
+                <select
+                  value={templateId}
+                  onChange={event => {
+                    const id = event.target.value;
+                    setTemplateId(id);
+                    const tpl = PROJECT_TEMPLATES.find(t => t.id === id);
+                    if (tpl) {
+                      setName(tpl.name);
+                      setDescription(tpl.description);
+                      setIcon(tpl.icon);
+                      setColor(tpl.color);
+                    }
+                  }}
+                  className="custom-select w-full rounded-lg border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-sm text-white focus:border-sky-500/50 focus:outline-none"
+                >
+                  <option value="">不使用模板</option>
+                  {PROJECT_TEMPLATES.map(tpl => (
+                    <option key={tpl.id} value={tpl.id}>{tpl.icon} {tpl.name}</option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-slate-400">项目名称</label>
                 <input value={name} onChange={event => setName(event.target.value)} placeholder="例如：我的网站改版" className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none" onKeyDown={event => event.key === 'Enter' && handleAdd()} autoFocus />

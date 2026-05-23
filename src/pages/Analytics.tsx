@@ -12,6 +12,7 @@ import { formatDurationDeltaFromMinutes, formatDurationFromMinutes } from '../li
 
 const AnalyticsCharts = lazy(() => import('../components/charts/AnalyticsCharts'));
 const BurndownChart = lazy(() => import('../components/charts/BurndownChart'));
+const CFDChart = lazy(() => import('../components/charts/CFDChart'));
 
 const moodScoreMap: Record<MoodType, number> = {
   great: 5,
@@ -313,6 +314,10 @@ export default function Analytics() {
 
       <Suspense fallback={<div className="glass rounded-[28px] p-5 text-sm text-slate-500">正在加载分析图表...</div>}>
         <BurndownChart tasks={tasks} milestones={milestones} />
+      </Suspense>
+
+      <Suspense fallback={<div className="glass rounded-[28px] p-5 text-sm text-slate-500">正在加载分析图表...</div>}>
+        <CFDChart tasks={tasks} />
       </Suspense>
 
       <Suspense fallback={<div className="glass rounded-[28px] p-5 text-sm text-slate-500">正在加载分析图表...</div>}>

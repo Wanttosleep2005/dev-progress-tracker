@@ -25,6 +25,8 @@ import {
 import { useAppStore } from '../../stores/useAppStore';
 import { PROJECT_COLORS, PROJECT_ICONS } from '../../types';
 import FocusTimerPanel from '../FocusTimer';
+import NotificationBell from '../NotificationBell';
+import { applyTemplate, PROJECT_TEMPLATES } from '../../lib/templates';
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -38,6 +40,7 @@ export default function Sidebar() {
   const [deadline, setDeadline] = useState('');
   const [editingDeadlineId, setEditingDeadlineId] = useState<number | null>(null);
   const [editDeadlineValue, setEditDeadlineValue] = useState('');
+  const [templateId, setTemplateId] = useState('');
 
   const currentProject = projects.find(project => project.id === currentProjectId);
 
@@ -60,7 +63,7 @@ export default function Sidebar() {
 
   const handleCreate = useCallback(async () => {
     if (!name.trim()) return;
-    await addProject({
+    const id = await addProject({
       name: name.trim(),
       description: '',
       color,
@@ -68,11 +71,16 @@ export default function Sidebar() {
       status: 'active',
       deadline: deadline || null,
     });
+    if (templateId && id) {
+      await applyTemplate(templateId, id);
+      await useAppStore.getState().loadProjects();
+    }
     setName('');
     setDeadline('');
+    setTemplateId('');
     setShowCreate(false);
     setShowSelector(false);
-  }, [addProject, color, deadline, icon, name]);
+  }, [addProject, color, deadline, icon, name, templateId]);
 
   const handleImport = () => {
     const input = document.createElement('input');
@@ -119,8 +127,8 @@ export default function Sidebar() {
 
   return (
     <aside className="flex h-screen w-[292px] shrink-0 flex-col border-r border-white/[0.05] bg-[#09111c]/95 backdrop-blur">
-      <div className="border-b border-white/[0.05] p-4">
-        <div className="relative">
+      <div className="flex items-center gap-2 border-b border-white/[0.05] p-4">
+        <div className="relative flex-1">
           <button
             onClick={() => setShowSelector(value => !value)}
             className="flex w-full items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-3 py-3 text-left transition hover:bg-white/[0.05]"
@@ -197,6 +205,7 @@ export default function Sidebar() {
             </div>
           )}
         </div>
+        <NotificationBell />
       </div>
 
       <nav className="flex-1 overflow-y-auto px-4 py-4">
@@ -262,6 +271,28 @@ export default function Sidebar() {
           <div className="glass glow w-full max-w-md p-6" onClick={event => event.stopPropagation()}>
             <h3 className="mb-5 text-lg font-bold text-white">创建新项目</h3>
             <div className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-xs text-slate-400">模板（可选）</label>
+                <select
+                  value={templateId}
+                  onChange={event => {
+                    const id = event.target.value;
+                    setTemplateId(id);
+                    const tpl = PROJECT_TEMPLATES.find(t => t.id === id);
+                    if (tpl) {
+                      setName(tpl.name);
+                      setIcon(tpl.icon);
+                      setColor(tpl.color);
+                    }
+                  }}
+                  className="custom-select w-full rounded-xl border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-sm text-white focus:border-sky-500/50 focus:outline-none"
+                >
+                  <option value="">不使用模板</option>
+                  {PROJECT_TEMPLATES.map(tpl => (
+                    <option key={tpl.id} value={tpl.id}>{tpl.icon} {tpl.name}</option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="mb-1.5 block text-xs text-slate-400">项目名称</label>
                 <input

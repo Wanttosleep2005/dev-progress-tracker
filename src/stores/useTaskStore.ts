@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Task, TaskStatus } from '../types';
+import type { RecurrenceRule, Task, TaskStatus } from '../types';
 import * as db from '../db/database';
 import { useAppStore } from './useAppStore';
 import { useMilestoneStore } from './useMilestoneStore';
@@ -9,6 +9,52 @@ import { recordTaskCreated, recordTaskStatusChanged } from '../lib/systemEvents'
 import { refreshMilestonesForTaskChange } from '../lib/milestones';
 import { getBlockingTasks } from '../lib/taskDependencies';
 import { recordCollaborationEvent } from '../lib/cloudSync';
+import { useNotificationCenterStore } from './useNotificationCenterStore';
+
+function nextDueDate(recurrence: RecurrenceRule, currentDueDate: string | null): string | null {
+  if (recurrence === 'none' || !currentDueDate) return null;
+  const base = new Date(currentDueDate);
+  if (isNaN(base.getTime())) return null;
+  switch (recurrence) {
+    case 'daily': base.setDate(base.getDate() + 1); break;
+    case 'weekly': base.setDate(base.getDate() + 7); break;
+    case 'monthly': base.setMonth(base.getMonth() + 1); break;
+  }
+  return base.toISOString().slice(0, 16);
+}
+
+async function generateNextRecurringTask(task: Task) {
+  if (!task.recurrence || task.recurrence === 'none') return;
+  const nextDue = nextDueDate(task.recurrence, task.dueDate);
+  const now = new Date().toISOString();
+  const nextTask: Omit<Task, 'id' | 'createdAt' | 'updatedAt'> = {
+    projectId: task.projectId,
+    title: task.title,
+    description: task.description,
+    status: 'todo',
+    priority: task.priority,
+    tags: task.tags,
+    dueDate: nextDue,
+    plannedStartAt: null,
+    plannedEndAt: null,
+    milestoneId: task.milestoneId,
+    estimatedMinutes: task.estimatedMinutes,
+    url: task.url,
+    recurrence: task.recurrence,
+    source: 'board',
+    remindAt: null,
+    isTodayTask: false,
+    publishedAt: null,
+    dependencyIds: task.dependencyIds ?? [],
+    dependsOn: task.dependsOn ?? [],
+    assigneeId: task.assigneeId,
+    createdBy: task.createdBy,
+    updatedBy: task.updatedBy,
+    remoteId: null,
+    syncUpdatedAt: now,
+  };
+  await db.addTask(nextTask);
+}
 
 interface TaskStore {
   tasks: Task[];
@@ -101,6 +147,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
           title: `完成了任务「${task.title}」`,
           description: `${user?.displayName ?? '本地用户'} 完成了任务「${task.title}」`,
         });
+        await generateNextRecurringTask({ ...task, ...changes });
+        await useNotificationCenterStore.getState().add('milestone_done', '任务已完成', `「${task.title}」已标记为完成`, '/tasks', task.projectId);
       }
     }
 
@@ -161,6 +209,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         title: `完成了任务「${task.title}」`,
         description: `${user?.displayName ?? '本地用户'} 完成了任务「${task.title}」`,
       });
+      await generateNextRecurringTask({ ...task, status });
+      await useNotificationCenterStore.getState().add('milestone_done', '任务已完成', `「${task.title}」已标记为完成`, '/tasks', task.projectId);
     }
     await refreshMilestonesForTaskChange(task.projectId, task.milestoneId, task.milestoneId);
     await useMilestoneStore.getState().load(task.projectId);

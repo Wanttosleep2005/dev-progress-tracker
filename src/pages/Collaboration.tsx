@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Cloud, Copy, Link2, Mail, RefreshCw, Rocket, Shield, Users } from 'lucide-react';
+import { Cloud, Copy, Crown, Link2, Mail, RefreshCw, Rocket, Shield, Users } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { useCloudStore } from '../stores/useCloudStore';
 import type { SyncStatus, TeamRole } from '../types';
@@ -38,6 +38,7 @@ export default function Collaboration() {
     inviteByEmail,
     updateMemberRole,
     removeMember,
+    transferOwnership,
     createInviteLink,
     publishProject,
     getRole,
@@ -48,6 +49,7 @@ export default function Collaboration() {
   const [displayName, setDisplayName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [role, setRole] = useState<TeamRole>('editor');
+  const [removeConfirm, setRemoveConfirm] = useState<number | null>(null);
 
   useEffect(() => {
     if (currentProjectId) loadTeam(currentProjectId);
@@ -56,6 +58,10 @@ export default function Collaboration() {
   const currentRole = useMemo(() => getRole(currentProjectId), [currentProjectId, getRole, members]);
   const isOwner = canOwn(currentProjectId);
   const isShared = Boolean(project?.remoteProjectId);
+  const isMe = (member: typeof members[number]) => {
+    if (!user) return false;
+    return member.userId === user.id || member.email === user.email || member.userId === `email:${user.email}`;
+  };
 
   const handleInvite = async () => {
     if (!currentProjectId || !inviteEmail.trim() || !isOwner) return;
@@ -199,20 +205,52 @@ export default function Collaboration() {
             <p className="text-sm text-slate-500">当前项目还没有团队成员记录。</p>
           ) : (
             <div className="space-y-3">
-              {members.map(member => (
-                <div key={member.id ?? member.userId} className="flex flex-col gap-3 rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4 sm:flex-row sm:items-center sm:justify-between">
+              {members.map(member => {
+                const me = isMe(member);
+                const cantModify = !isOwner || member.role === 'owner';
+                return (
+                <div key={member.id ?? member.userId} className={`flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between ${me ? 'border-cyan-500/30 bg-cyan-500/5' : 'border-white/[0.05] bg-white/[0.02]'}`}>
                   <div>
-                    <p className="text-sm font-medium text-white">{member.displayName || member.email || member.userId}</p>
+                    <p className="flex items-center gap-2 text-sm font-medium text-white">
+                      {member.displayName || member.email || member.userId}
+                      {me && <span className="rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold text-cyan-300">我</span>}
+                      {member.role === 'owner' && <Crown size={12} className="text-amber-400" />}
+                    </p>
                     <p className="mt-1 text-xs text-slate-500">{member.online ? '在线' : `最后在线 ${member.lastSeenAt ? new Date(member.lastSeenAt).toLocaleString('zh-CN') : '未知'}`}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <select disabled={!isOwner || member.role === 'owner'} value={member.role} onChange={event => member.id && updateMemberRole(member.id, event.target.value as TeamRole)} className="rounded-xl border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50">
+                    <select
+                      disabled={cantModify || me}
+                      value={member.role}
+                      onChange={event => member.id && updateMemberRole(member.id, event.target.value as TeamRole)}
+                      className="custom-select rounded-xl border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
                       {Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                     </select>
-                    <button disabled={!isOwner || member.role === 'owner'} onClick={() => member.id && removeMember(member.id)} className="rounded-xl px-3 py-2 text-xs text-red-300 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40">移除</button>
+                    {isOwner && !me && member.role !== 'owner' && (
+                      <button
+                        onClick={() => member.id && transferOwnership(currentProjectId!, member.id)}
+                        className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-2 py-2 text-xs text-amber-300 hover:bg-amber-500/20"
+                        title="转让所有权"
+                      >
+                        <Crown size={12} />
+                      </button>
+                    )}
+                    {removeConfirm === member.id ? (
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => { member.id && removeMember(member.id); setRemoveConfirm(null); }} className="rounded-xl bg-red-500 px-2 py-2 text-xs font-medium text-white hover:bg-red-600">确认</button>
+                        <button onClick={() => setRemoveConfirm(null)} className="rounded-xl border border-white/[0.06] px-2 py-2 text-xs text-slate-300 hover:bg-white/[0.04]">取消</button>
+                      </div>
+                    ) : (
+                      <button
+                        disabled={cantModify || me}
+                        onClick={() => member.id && setRemoveConfirm(member.id)}
+                        className="rounded-xl px-3 py-2 text-xs text-red-300 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                      >移除</button>
+                    )}
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           )}
         </div>

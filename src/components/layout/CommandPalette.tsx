@@ -4,6 +4,9 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowRight, Search } from 'lucide-react';
 import { useAppStore } from '../../stores/useAppStore';
 import { useTaskStore } from '../../stores/useTaskStore';
+import { useMilestoneStore } from '../../stores/useMilestoneStore';
+import { useDiaryStore } from '../../stores/useDiaryStore';
+import { useTimelineStore } from '../../stores/useTimelineStore';
 import { useCommandPalette } from '../../stores/useCommandPalette';
 
 export default function CommandPalette() {
@@ -11,6 +14,9 @@ export default function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const { projects, currentProjectId, setCurrentProject } = useAppStore();
   const tasks = useTaskStore(state => state.tasks);
+  const milestones = useMilestoneStore(state => state.milestones);
+  const diaryEntries = useDiaryStore(state => state.entries);
+  const timelineEvents = useTimelineStore(state => state.events);
   const { open, query, closePalette, setQuery } = useCommandPalette();
 
   useEffect(() => {
@@ -59,6 +65,27 @@ export default function CommandPalette() {
     return pages.filter(page => page.label.toLowerCase().includes(normalizedQuery));
   }, [normalizedQuery]);
 
+  const filteredMilestones = useMemo(() => {
+    if (!normalizedQuery) return [];
+    return milestones
+      .filter(m => [m.title, m.description].join(' ').toLowerCase().includes(normalizedQuery))
+      .slice(0, 4);
+  }, [normalizedQuery, milestones]);
+
+  const filteredDiaries = useMemo(() => {
+    if (!normalizedQuery) return [];
+    return diaryEntries
+      .filter(d => [d.content, ...d.tags].join(' ').toLowerCase().includes(normalizedQuery))
+      .slice(0, 4);
+  }, [normalizedQuery, diaryEntries]);
+
+  const filteredEvents = useMemo(() => {
+    if (!normalizedQuery) return [];
+    return timelineEvents
+      .filter(e => [e.title, e.description].join(' ').toLowerCase().includes(normalizedQuery))
+      .slice(0, 4);
+  }, [normalizedQuery, timelineEvents]);
+
   const handleOpenTask = (projectId: number, taskId?: number) => {
     if (projectId !== currentProjectId) {
       setCurrentProject(projectId);
@@ -76,6 +103,24 @@ export default function CommandPalette() {
   const handleOpenPage = (to: string) => {
     closePalette();
     navigate(to);
+  };
+
+  const handleOpenMilestone = (projectId: number) => {
+    if (projectId !== currentProjectId) setCurrentProject(projectId);
+    closePalette();
+    navigate('/milestones');
+  };
+
+  const handleOpenDiary = (projectId: number, date: string) => {
+    if (projectId !== currentProjectId) setCurrentProject(projectId);
+    closePalette();
+    navigate('/diary', { state: { date } });
+  };
+
+  const handleOpenEvent = (projectId: number) => {
+    if (projectId !== currentProjectId) setCurrentProject(projectId);
+    closePalette();
+    navigate('/timeline');
   };
 
   return (
@@ -146,6 +191,63 @@ export default function CommandPalette() {
                 </section>
               )}
 
+              {filteredMilestones.length > 0 && (
+                <section className="mb-3">
+                  <p className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-600">里程碑</p>
+                  {filteredMilestones.map(m => (
+                    <button
+                      key={m.id}
+                      onClick={() => handleOpenMilestone(m.projectId)}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-200 transition hover:bg-white/[0.04]"
+                    >
+                      <span className="text-base">🎯</span>
+                      <div className="min-w-0">
+                        <p className="truncate">{m.title}</p>
+                        <p className="mt-0.5 truncate text-[11px] text-slate-500">{m.description || '暂无描述'} · {m.progress}%</p>
+                      </div>
+                    </button>
+                  ))}
+                </section>
+              )}
+
+              {filteredDiaries.length > 0 && (
+                <section className="mb-3">
+                  <p className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-600">日记</p>
+                  {filteredDiaries.map(d => (
+                    <button
+                      key={d.id}
+                      onClick={() => handleOpenDiary(d.projectId, d.date)}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-200 transition hover:bg-white/[0.04]"
+                    >
+                      <span className="text-base">📝</span>
+                      <div className="min-w-0">
+                        <p className="truncate">{d.date}</p>
+                        <p className="mt-0.5 truncate text-[11px] text-slate-500">{d.content.slice(0, 80)}{d.content.length > 80 ? '…' : ''}</p>
+                      </div>
+                    </button>
+                  ))}
+                </section>
+              )}
+
+              {filteredEvents.length > 0 && (
+                <section className="mb-3">
+                  <p className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-600">时间线事件</p>
+                  {filteredEvents.map(e => (
+                    <button
+                      key={e.id}
+                      onClick={() => handleOpenEvent(e.projectId)}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-200 transition hover:bg-white/[0.04]"
+                    >
+                      <span className="text-base">📅</span>
+                      <div className="min-w-0">
+                        <p className="truncate">{e.title}</p>
+                        <p className="mt-0.5 truncate text-[11px] text-slate-500">{e.date} · {e.description.slice(0, 50)}{e.description.length > 50 ? '…' : ''}</p>
+                      </div>
+                    </button>
+                  ))}
+                </section>
+              )}
+
               <section>
                 <p className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-600">页面</p>
                 {filteredPages.map(page => (
@@ -160,9 +262,9 @@ export default function CommandPalette() {
                 ))}
               </section>
 
-              {normalizedQuery && filteredTasks.length === 0 && filteredProjects.length === 0 && filteredPages.length === 0 && (
+              {normalizedQuery && filteredTasks.length === 0 && filteredProjects.length === 0 && filteredPages.length === 0 && filteredMilestones.length === 0 && filteredDiaries.length === 0 && filteredEvents.length === 0 && (
                 <div className="px-3 py-8 text-center text-sm text-slate-500">
-                  没有找到匹配结果，可以试试项目名、任务标题或标签关键词。
+                  没有找到匹配结果，可以试试项目名、任务标题、标签、日记内容或里程碑关键词。
                 </div>
               )}
             </div>

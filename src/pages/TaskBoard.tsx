@@ -21,8 +21,8 @@ import { useAppStore } from '../stores/useAppStore';
 import { useMilestoneStore } from '../stores/useMilestoneStore';
 import { useTaskStore } from '../stores/useTaskStore';
 import { useCloudStore } from '../stores/useCloudStore';
-import { PRIORITY_COLORS, PRIORITY_LABELS, STATUS_LABELS, TASK_TEMPLATES } from '../types';
-import type { Task, TaskPriority, TaskStatus, ViewMode } from '../types';
+import { PRIORITY_COLORS, PRIORITY_LABELS, RECURRENCE_LABELS, STATUS_LABELS, TASK_TEMPLATES } from '../types';
+import type { RecurrenceRule, Task, TaskPriority, TaskStatus, ViewMode } from '../types';
 import { getTaskActualMinutes } from '../lib/reporting';
 import { startFocusTimer } from '../components/FocusTimer';
 import SelectField from '../components/ui/SelectField';
@@ -64,6 +64,7 @@ export default function TaskBoard() {
   const [newMilestoneId, setNewMilestoneId] = useState<number | null>(null);
   const [newEstimatedMinutes, setNewEstimatedMinutes] = useState('45');
   const [newUrl, setNewUrl] = useState('');
+  const [newRecurrence, setNewRecurrence] = useState<RecurrenceRule>('none');
 
   const milestoneTaskCount = useMemo(() => {
     return milestones.reduce<Record<number, number>>((acc, milestone) => {
@@ -81,6 +82,7 @@ export default function TaskBoard() {
     setNewMilestoneId(null);
     setNewEstimatedMinutes('45');
     setNewUrl('');
+    setNewRecurrence('none');
   };
 
   const handleAdd = useCallback(async () => {
@@ -96,6 +98,7 @@ export default function TaskBoard() {
       milestoneId: newMilestoneId,
       estimatedMinutes: newEstimatedMinutes ? parseInt(newEstimatedMinutes) || null : null,
       url: newUrl.trim(),
+      recurrence: newRecurrence,
       source: 'board',
       remindAt: null,
       isTodayTask: false,
@@ -398,6 +401,9 @@ export default function TaskBoard() {
               <input value={newUrl} onChange={event => setNewUrl(event.target.value)} placeholder="外部链接" className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none" />
               <input type="date" value={newDueDate} onChange={event => setNewDueDate(event.target.value)} className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white focus:border-sky-500/50 focus:outline-none" />
               <input type="number" min="0" step="5" value={newEstimatedMinutes} onChange={event => setNewEstimatedMinutes(event.target.value)} placeholder="预估工时（分钟）" className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-sky-500/50 focus:outline-none" />
+              <select value={newRecurrence} onChange={event => setNewRecurrence(event.target.value as RecurrenceRule)} className="custom-select rounded-xl border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-sm text-white focus:border-sky-500/50 focus:outline-none">
+                {Object.entries(RECURRENCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
               <SelectField value={newPriority} onChange={event => setNewPriority(event.target.value as TaskPriority)} options={priorityOptions} />
               <SelectField value={newMilestoneId ?? ''} onChange={event => setNewMilestoneId(event.target.value ? parseInt(event.target.value) : null)} placeholder="暂不关联里程碑" options={milestoneOptions} />
             </div>
@@ -544,6 +550,12 @@ export default function TaskBoard() {
                   <label className="mb-1.5 block text-xs text-slate-400">里程碑</label>
                   <SelectField value={editingTask.milestoneId ?? ''} onChange={event => setEditingTask({ ...editingTask, milestoneId: event.target.value ? parseInt(event.target.value) : null })} placeholder="暂不关联里程碑" options={milestoneOptions} />
                 </div>
+                <div>
+                  <label className="mb-1.5 block text-xs text-slate-400">循环</label>
+                  <select value={editingTask.recurrence ?? 'none'} onChange={event => setEditingTask({ ...editingTask, recurrence: event.target.value as RecurrenceRule })} className="custom-select w-full rounded-xl border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-sm text-white focus:border-sky-500/50 focus:outline-none">
+                    {Object.entries(RECURRENCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </div>
                 <div className="lg:col-span-2 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
@@ -641,6 +653,7 @@ export default function TaskBoard() {
                           milestoneId: editingTask.milestoneId,
                           estimatedMinutes: editingTask.estimatedMinutes,
                           url: editingTask.url,
+                          recurrence: editingTask.recurrence ?? 'none',
                           dependsOn: getTaskDependencyIds(editingTask),
                           dependencyIds: getTaskDependencyIds(editingTask),
                         });

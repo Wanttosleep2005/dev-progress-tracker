@@ -112,6 +112,7 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
             updatedBy: null,
             remoteId: null,
             syncUpdatedAt: null,
+            recurrence: 'none',
           });
         }
 
@@ -129,6 +130,7 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
             updatedBy: null,
             remoteId: null,
             syncUpdatedAt: null,
+            recurrence: 'none',
           });
         }
 

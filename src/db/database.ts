@@ -6,6 +6,7 @@ import type {
   DiaryEntry,
   InviteLink,
   Milestone,
+  Notification,
   Project,
   SyncChange,
   Task,
@@ -25,14 +26,15 @@ class DevTrackDatabase extends Dexie {
   teamMembers!: Table<TeamMember, number>;
   syncChanges!: Table<SyncChange, number>;
   collaborationEvents!: Table<CollaborationEvent, number>;
+  notifications!: Table<Notification, number>;
   inviteLinks!: Table<InviteLink, number>;
 
   constructor() {
     super('DevTrackDB');
-    this.version(9)
+    this.version(10)
       .stores({
         projects: '++id, remoteProjectId, status, createdAt',
-        tasks: '++id, projectId, status, priority, milestoneId, dueDate, isTodayTask, remindAt, assigneeId, createdAt',
+        tasks: '++id, projectId, status, priority, milestoneId, dueDate, isTodayTask, remindAt, assigneeId, recurrence, createdAt',
         milestones: '++id, projectId, status, dueDate, createdAt',
         timelineEvents: '++id, projectId, type, date, relatedTaskId',
         diaryEntries: '++id, projectId, date',
@@ -41,7 +43,18 @@ class DevTrackDatabase extends Dexie {
         teamMembers: '++id, projectId, userId, role, joinedAt',
         syncChanges: '++id, [entityType+entityId], projectId, localUpdatedAt, conflict',
         collaborationEvents: '++id, projectId, userId, type, createdAt',
+        notifications: '++id, type, read, projectId, createdAt',
         inviteLinks: '++id, projectId, token, createdBy, createdAt',
+      })
+      .upgrade(async tx => {
+        const tasks = await tx.table('tasks').toArray();
+        for (const task of tasks) {
+          const patch: Partial<Task> = {};
+          if (!('recurrence' in task)) patch.recurrence = 'none';
+          if (Object.keys(patch).length > 0) {
+            await tx.table('tasks').update(task.id, patch);
+          }
+        }
       })
       .upgrade(async tx => {
         const projects = await tx.table('projects').toArray();
@@ -344,4 +357,29 @@ export async function seedAchievements(achievements: Omit<Achievement, 'id' | 'u
       await db.achievements.add({ ...achievement, unlockedAt: null });
     }
   }
+}
+
+export async function getUnreadNotificationCount(): Promise<number> {
+  return db.notifications.where('read').equals(false).count();
+}
+
+export async function getNotifications(limit = 50): Promise<Notification[]> {
+  return db.notifications.orderBy('createdAt').reverse().limit(limit).toArray();
+}
+
+export async function addNotification(notification: Omit<Notification, 'id' | 'createdAt' | 'read'>): Promise<number> {
+  const record = { ...notification, read: false, createdAt: new Date().toISOString() };
+  return db.notifications.add(record);
+}
+
+export async function markNotificationRead(id: number): Promise<void> {
+  await db.notifications.update(id, { read: true });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await db.notifications.where('read').equals(false).modify({ read: true });
+}
+
+export async function clearNotifications(): Promise<void> {
+  await db.notifications.clear();
 }
