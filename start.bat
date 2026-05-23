@@ -10,5 +10,5 @@ echo   正在启动开发服务器...
 echo.
 cd /d "%~dp0"
 start http://localhost:5173
-npx vite --port 5173 --strictPort
+npx vite --host --port 5173 --strictPort
 pause
