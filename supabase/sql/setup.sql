@@ -204,6 +204,134 @@ as $$
   );
 $$;
 
+create function public.devtrack_join_project(
+  p_project_id text,
+  p_role text default 'viewer',
+  p_email text default null,
+  p_display_name text default null
+)
+returns table (
+  project_id text,
+  role text,
+  already_member boolean
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id text := auth.uid()::text;
+  v_email text := lower(coalesce(p_email, auth.jwt() ->> 'email', ''));
+  v_owner_id text;
+  v_existing public.devtrack_project_members%rowtype;
+  v_join_role text := case when p_role in ('editor', 'viewer') then p_role else 'viewer' end;
+begin
+  if v_user_id is null then
+    raise exception 'Authentication required';
+  end if;
+
+  select p.owner_id
+    into v_owner_id
+    from public.devtrack_projects as p
+    where p.id = p_project_id;
+
+  if v_owner_id is null then
+    raise exception 'Project not found';
+  end if;
+
+  if v_owner_id = v_user_id then
+    insert into public.devtrack_project_members (
+      project_id,
+      user_id,
+      role,
+      email,
+      display_name,
+      joined_at,
+      last_seen_at
+    )
+    values (
+      p_project_id,
+      v_user_id,
+      'owner',
+      p_email,
+      p_display_name,
+      now(),
+      now()
+    )
+    on conflict (project_id, user_id) do update
+    set
+      role = 'owner',
+      email = coalesce(excluded.email, public.devtrack_project_members.email),
+      display_name = coalesce(excluded.display_name, public.devtrack_project_members.display_name),
+      last_seen_at = now();
+
+    return query select p_project_id, 'owner'::text, true;
+    return;
+  end if;
+
+  -- Qualify member columns so RETURNS TABLE(project_id, role) never shadows table columns.
+  select m.*
+    into v_existing
+    from public.devtrack_project_members as m
+    where m.project_id = p_project_id
+      and (
+        m.user_id = v_user_id
+        or lower(coalesce(m.email, '')) = v_email
+      )
+    order by case when m.user_id = v_user_id then 0 else 1 end
+    limit 1;
+
+  if found then
+    if v_existing.user_id <> v_user_id then
+      delete from public.devtrack_project_members as m
+        where m.project_id = p_project_id
+          and m.user_id = v_user_id
+          and m.role <> 'owner';
+    end if;
+
+    update public.devtrack_project_members as m
+      set
+        user_id = v_user_id,
+        role = case when v_existing.role = 'owner' then 'owner' else v_existing.role end,
+        email = coalesce(p_email, m.email),
+        display_name = coalesce(p_display_name, m.display_name),
+        last_seen_at = now()
+      where m.project_id = v_existing.project_id
+        and m.user_id = v_existing.user_id;
+
+    return query select p_project_id, (case when v_existing.role = 'owner' then 'owner' else v_existing.role end)::text, true;
+    return;
+  end if;
+
+  insert into public.devtrack_project_members (
+    project_id,
+    user_id,
+    role,
+    email,
+    display_name,
+    joined_at,
+    last_seen_at
+  )
+  values (
+    p_project_id,
+    v_user_id,
+    v_join_role,
+    p_email,
+    p_display_name,
+    now(),
+    now()
+  )
+  on conflict (project_id, user_id) do update
+  set
+    role = case when public.devtrack_project_members.role = 'owner' then 'owner' else public.devtrack_project_members.role end,
+    email = coalesce(excluded.email, public.devtrack_project_members.email),
+    display_name = coalesce(excluded.display_name, public.devtrack_project_members.display_name),
+    last_seen_at = now();
+
+  return query select p_project_id, v_join_role, false;
+end;
+$$;
+
 create function public.devtrack_can_edit_project(project_id_arg text)
 returns boolean
 language sql
@@ -295,6 +423,43 @@ alter table public.devtrack_projects enable row level security;
 alter table public.devtrack_project_members enable row level security;
 alter table public.devtrack_sync_records enable row level security;
 
+alter table public.devtrack_sync_records replica identity full;
+alter table public.devtrack_project_members replica identity full;
+alter table public.devtrack_projects replica identity full;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'devtrack_sync_records'
+  ) then
+    alter publication supabase_realtime add table public.devtrack_sync_records;
+  end if;
+
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'devtrack_project_members'
+  ) then
+    alter publication supabase_realtime add table public.devtrack_project_members;
+  end if;
+
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'devtrack_projects'
+  ) then
+    alter publication supabase_realtime add table public.devtrack_projects;
+  end if;
+end $$;
+
 -- RLS policies for devtrack_projects
 create policy "devtrack_projects_select" on public.devtrack_projects for select to authenticated using (public.devtrack_is_project_member(id, null));
 create policy "devtrack_projects_insert" on public.devtrack_projects for insert to authenticated with check (owner_id = auth.uid()::text);
@@ -309,9 +474,9 @@ create policy "devtrack_members_delete" on public.devtrack_project_members for d
 
 -- RLS policies for devtrack_sync_records
 create policy "devtrack_sync_select" on public.devtrack_sync_records for select to authenticated using (public.devtrack_is_project_member(remote_project_id, null));
-create policy "devtrack_sync_insert" on public.devtrack_sync_records for insert to authenticated with check (user_id = auth.uid()::text and ((entity_type in ('projects', 'milestones') and public.devtrack_is_project_owner(remote_project_id)) or (entity_type not in ('projects', 'milestones') and public.devtrack_can_edit_project(remote_project_id))));
-create policy "devtrack_sync_update" on public.devtrack_sync_records for update to authenticated using ((entity_type in ('projects', 'milestones') and public.devtrack_is_project_owner(remote_project_id)) or (entity_type not in ('projects', 'milestones') and public.devtrack_can_edit_project(remote_project_id))) with check ((entity_type in ('projects', 'milestones') and public.devtrack_is_project_owner(remote_project_id)) or (entity_type not in ('projects', 'milestones') and public.devtrack_can_edit_project(remote_project_id)));
-create policy "devtrack_sync_delete" on public.devtrack_sync_records for delete to authenticated using ((entity_type in ('projects', 'milestones') and public.devtrack_is_project_owner(remote_project_id)) or (entity_type not in ('projects', 'milestones') and public.devtrack_can_edit_project(remote_project_id)));
+create policy "devtrack_sync_insert" on public.devtrack_sync_records for insert to authenticated with check (user_id = auth.uid()::text and ((entity_type = 'projects' and public.devtrack_is_project_owner(remote_project_id)) or (entity_type <> 'projects' and public.devtrack_can_edit_project(remote_project_id))));
+create policy "devtrack_sync_update" on public.devtrack_sync_records for update to authenticated using ((entity_type = 'projects' and public.devtrack_is_project_owner(remote_project_id)) or (entity_type <> 'projects' and public.devtrack_can_edit_project(remote_project_id))) with check ((entity_type = 'projects' and public.devtrack_is_project_owner(remote_project_id)) or (entity_type <> 'projects' and public.devtrack_can_edit_project(remote_project_id)));
+create policy "devtrack_sync_delete" on public.devtrack_sync_records for delete to authenticated using ((entity_type = 'projects' and public.devtrack_is_project_owner(remote_project_id)) or (entity_type <> 'projects' and public.devtrack_can_edit_project(remote_project_id)));
 
 -- Grant permissions
 grant usage on schema public to authenticated;
@@ -319,6 +484,7 @@ grant select, insert, update, delete on public.devtrack_projects to authenticate
 grant select, insert, update, delete on public.devtrack_project_members to authenticated;
 grant select, insert, update, delete on public.devtrack_sync_records to authenticated;
 grant execute on function public.devtrack_publish_project(text, text, jsonb, timestamptz, text, text) to authenticated;
+grant execute on function public.devtrack_join_project(text, text, text, text) to authenticated;
 grant execute on function public.devtrack_touch_member_presence(text, text, text) to authenticated;
 grant execute on function public.devtrack_forget_current_user() to authenticated;
 

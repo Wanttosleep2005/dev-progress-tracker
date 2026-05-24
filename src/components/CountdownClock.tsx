@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Clock, AlertTriangle } from 'lucide-react';
 
@@ -9,15 +9,12 @@ interface CountdownClockProps {
 
 export default function CountdownClock({ deadline, createdAt }: CountdownClockProps) {
   const [now, setNow] = useState(new Date());
-  const totalDuration = useRef(0);
 
   const targetDate = useMemo(() => new Date(deadline), [deadline]);
-
-  // Calculate total duration at mount
-  useEffect(() => {
+  const totalDuration = useMemo(() => {
     const start = createdAt ? new Date(createdAt) : new Date();
-    totalDuration.current = Math.max(1, targetDate.getTime() - start.getTime());
-  }, [deadline, createdAt, targetDate]);
+    return Math.max(1, targetDate.getTime() - start.getTime());
+  }, [createdAt, targetDate]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -36,15 +33,15 @@ export default function CountdownClock({ deadline, createdAt }: CountdownClockPr
 
     // Progress: how much time has elapsed
     let pct = 0;
-    if (!isOver && totalDuration.current > 0) {
-      const elapsed = totalDuration.current - diff;
-      pct = Math.min(100, Math.round((elapsed / totalDuration.current) * 100));
+    if (!isOver && totalDuration > 0) {
+      const elapsed = totalDuration - diff;
+      pct = Math.min(100, Math.round((elapsed / totalDuration) * 100));
     } else if (isOver) {
       pct = 100;
     }
 
     return { days: d, hours: h, minutes: m, seconds: s, isOverdue: isOver, isUrgent: !isOver && d < 3, progress: pct };
-  }, [deadline, now, targetDate]);
+  }, [now, targetDate, totalDuration]);
 
   const pad = (n: number) => String(n).padStart(2, '0');
 

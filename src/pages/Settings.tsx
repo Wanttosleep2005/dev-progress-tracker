@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Bell, Database, Download, Eye, FileText, FolderOpen, Info, Keyboard, Network, Settings, Sparkles, Trash2, Upload, UserX } from 'lucide-react';
+import { Bell, Copy, Database, Download, Eye, FileText, FolderOpen, Info, Keyboard, Network, Settings, Sparkles, Trash2, Upload, UserX } from 'lucide-react';
 import { db } from '../db/database';
 import { buildWeeklyReport } from '../lib/reporting';
 import { useAppStore } from '../stores/useAppStore';
@@ -12,6 +12,7 @@ import { usePreferences } from '../stores/usePreferences';
 import { useSidebarStore } from '../stores/useSidebarStore';
 import { useNotificationStore } from '../stores/useNotificationStore';
 import { useCloudStore } from '../stores/useCloudStore';
+import { useToast } from '../stores/useToast';
 import { getCustomBaseUrl, setCustomBaseUrl } from '../lib/cloudSync';
 import { getBackupDirectory, getBackupDirectoryLabel, selectBackupDirectory, setBackupDirectory } from '../lib/backup';
 import TimePicker from '../components/ui/TimePicker';
@@ -63,6 +64,10 @@ export default function SettingsPage() {
   const deleteCloudAccount = useCloudStore(state => state.deleteAccount);
   const signOutCloud = useCloudStore(state => state.signOut);
   const cloudLoading = useCloudStore(state => state.loading);
+  const syncState = useCloudStore(state => state.syncState);
+  const realtimeStatus = useCloudStore(state => state.realtimeStatus);
+  const cloudError = useCloudStore(state => state.error);
+  const addToast = useToast(state => state.add);
   const [message, setMessage] = useState('');
   const [version, setVersion] = useState('0.0.0');
   const [deletingCloudAccount, setDeletingCloudAccount] = useState(false);
@@ -78,9 +83,10 @@ export default function SettingsPage() {
     } catch { return {}; }
   });
   const [baseUrl, setBaseUrl] = useState(() => getCustomBaseUrl());
-  const [backupDir, setBackupDir] = useState(() => getBackupDirectory() || 'G:\\developspace\\dev-progress-tracker\\project-backups\\data');
-  const [backupDirLabel, setBackupDirLabel] = useState(() => getBackupDirectoryLabel());
+  const [backupDir, setBackupDir] = useState('');
+  const [backupDirLabel, setBackupDirLabel] = useState('');
   const [detectedIps, setDetectedIps] = useState<string[]>([]);
+  const teamJoinUrl = `${(baseUrl || window.location.origin).replace(/\/$/, '')}/invite?mode=join`;
 
   useEffect(() => {
     import('../../package.json')
@@ -89,6 +95,18 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => { initSidebar(); }, [initSidebar]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getBackupDirectory(), getBackupDirectoryLabel()]).then(([directory, label]) => {
+      if (cancelled) return;
+      setBackupDir(directory);
+      setBackupDirLabel(label);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cloudSession?.user.id]);
 
   const handleExport = async () => {
     try {
@@ -393,6 +411,33 @@ export default function SettingsPage() {
 
       <div className="glass rounded-3xl p-5">
         <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <Database size={16} className="text-cyan-300" />
+          同步状态
+        </h3>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {[
+            ['运行模式', collaborationMode === 'local' ? '单人纯净流' : '云协作模式'],
+            ['同步状态', syncState.syncStatus],
+            ['待同步数量', String(syncState.pendingChanges)],
+            ['实时连接', realtimeStatus],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+              <p className="text-xs text-slate-500">{label}</p>
+              <p className="mt-2 break-all text-sm font-semibold text-white">{value}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+          <p className="text-xs text-slate-500">最近同步时间</p>
+          <p className="mt-2 text-sm text-slate-300">{syncState.lastSyncedAt ? new Date(syncState.lastSyncedAt).toLocaleString('zh-CN') : '尚未同步'}</p>
+          {cloudError && (
+            <p className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">上次错误：{cloudError}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="glass rounded-3xl p-5">
+        <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-200">
           <Bell size={16} className="text-cyan-300" />
           浏览器通知
         </h3>
@@ -455,6 +500,9 @@ export default function SettingsPage() {
           onClick={() => updateSettings({ quietHoursEnabled: !notificationSettings.quietHoursEnabled })}
           className={`mt-3 rounded-xl px-4 py-2 text-sm ${notificationSettings.quietHoursEnabled ? 'bg-slate-500/20 text-slate-200' : 'border border-white/[0.06] text-slate-400'}`}
         >
+          {/*
+          {notificationSettings.quietHoursEnabled ? '静默时段已开启' : '开启静默时段'}
+          */}
           {notificationSettings.quietHoursEnabled ? '静默时段已开启' : '开启静默时段'}
         </button>
       </div>
@@ -671,6 +719,24 @@ export default function SettingsPage() {
             </button>
           )}
         </div>
+        <div className="mt-4 rounded-2xl border border-cyan-500/15 bg-cyan-500/[0.06] p-4">
+          <label className="mb-2 block text-xs text-cyan-200">团队连接地址</label>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input readOnly value={teamJoinUrl} className="flex-1 rounded-xl border border-white/[0.06] bg-[#07111d] px-3 py-2 text-sm text-cyan-50" />
+            <button
+              onClick={() => {
+                // Fixed workspace URL: members authenticate first, then paste a project invite.
+                navigator.clipboard?.writeText(teamJoinUrl);
+                addToast('团队连接地址已复制', 'success');
+              }}
+              className="flex items-center justify-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200 hover:bg-cyan-500/20"
+            >
+              <Copy size={14} />
+              复制
+            </button>
+          </div>
+          <p className="mt-2 text-[10px] leading-5 text-cyan-100/70">成员通过这个地址进入 DevTrack 注册/登录，再在页面内粘贴项目邀请链接加入具体项目。</p>
+        </div>
         <p className="mt-3 text-[10px] text-slate-600">
           启动开发服务器时请使用 <code className="rounded bg-white/[0.06] px-1 py-0.5 font-mono">npm run dev -- --host</code> 以暴露到局域网。
         </p>
@@ -690,7 +756,7 @@ export default function SettingsPage() {
             <input
               value={backupDir}
               onChange={event => setBackupDir(event.target.value)}
-              placeholder="例如：G:\developspace\dev-progress-tracker\project-backups\data"
+              placeholder=""
               className="flex-1 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-cyan-500/50 focus:outline-none"
             />
             <button
@@ -709,9 +775,9 @@ export default function SettingsPage() {
               选择文件夹
             </button>
             <button
-              onClick={() => {
-                setBackupDirectory(backupDir);
-                setBackupDirLabel(getBackupDirectoryLabel());
+              onClick={async () => {
+                await setBackupDirectory(backupDir);
+                setBackupDirLabel(await getBackupDirectoryLabel());
                 setMessage('备份文件存放目录已保存');
               }}
               className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-300 hover:bg-cyan-500/20"
@@ -754,6 +820,8 @@ export default function SettingsPage() {
           危险区域
         </h3>
         <p className="mb-4 text-xs text-slate-500">清空后无法恢复，建议先做一次导出备份。</p>
+        {/* Account deletion moved to /account so Settings only handles local data cleanup. */}
+        {false && (
         <div className="mb-4 rounded-2xl border border-red-500/10 bg-red-500/[0.04] p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -768,7 +836,7 @@ export default function SettingsPage() {
                 要让邮箱成为完全全新的 Supabase Auth 账号，必须部署账号删除 Edge Function，或在 Supabase 后台 Auth Users 手动删除该邮箱。
               </p>
               {cloudSession?.user.email && (
-                <p className="mt-2 text-[10px] text-slate-500">当前云端账号：{cloudSession.user.email}</p>
+                <p className="mt-2 text-[10px] text-slate-500">当前云端账号：{cloudSession?.user.email}</p>
               )}
             </div>
             <button
@@ -781,6 +849,7 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
+        )}
         <button
           onClick={handleClear}
           className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-300 hover:bg-red-500/20"

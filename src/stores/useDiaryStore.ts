@@ -14,6 +14,15 @@ interface DiaryStore {
   getByDate: (date: string) => DiaryEntry | undefined;
 }
 
+function diaryListSignature(entries: DiaryEntry[]) {
+  return entries.map(entry => [
+    entry.id,
+    entry.updatedAt,
+    entry.date,
+    entry.createdBy ?? '',
+  ].join(':')).join('|');
+}
+
 export const useDiaryStore = create<DiaryStore>((set, get) => ({
   entries: [],
   loading: false,
@@ -21,7 +30,10 @@ export const useDiaryStore = create<DiaryStore>((set, get) => ({
   load: async (projectId) => {
     set({ loading: true });
     const entries = await db.getDiaryByProject(projectId);
-    set({ entries, loading: false });
+    // Realtime refreshes can be frequent; keep the same array when diary rows are unchanged.
+    set(state => diaryListSignature(state.entries) === diaryListSignature(entries)
+      ? { loading: false }
+      : { entries, loading: false });
   },
 
   upsert: async (entry) => {
@@ -29,7 +41,8 @@ export const useDiaryStore = create<DiaryStore>((set, get) => ({
       useToast.getState().add('你没有编辑该共享项目日记的权限。', 'warning');
       return 0;
     }
-    const id = await db.upsertDiaryEntry(entry);
+    const userId = useCloudStore.getState().user?.id ?? null;
+    const id = await db.upsertDiaryEntry({ ...entry, createdBy: entry.createdBy ?? userId });
     await get().load(entry.projectId);
     await useAppStore.getState().checkAchievements();
     return id;

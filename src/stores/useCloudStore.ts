@@ -25,6 +25,7 @@ import {
   type CloudSession,
   type CloudIdentityDeletionResult,
 } from '../lib/cloudSync';
+import { subscribeProjectRealtime, unsubscribeProjectRealtime, type RealtimeStatus } from '../lib/realtimeSync';
 import { useAppStore } from './useAppStore';
 import { useToast } from './useToast';
 import { useNotificationCenterStore } from './useNotificationCenterStore';
@@ -37,6 +38,7 @@ interface CloudStore {
   members: TeamMember[];
   events: CollaborationEvent[];
   inviteUrl: string;
+  realtimeStatus: RealtimeStatus;
   loading: boolean;
   error: string;
   init: () => Promise<void>;
@@ -54,6 +56,8 @@ interface CloudStore {
   createInviteLink: (projectId: number, role: TeamMember['role']) => Promise<void>;
   publishProject: (projectId: number) => Promise<void>;
   joinProject: (remoteProjectId: string, role: TeamMember['role']) => Promise<void>;
+  startRealtime: (projectId: number | null) => Promise<void>;
+  stopRealtime: () => void;
   getRole: (projectId: number | null) => TeamMember['role'] | null;
   canEdit: (projectId: number | null) => boolean;
   canOwn: (projectId: number | null) => boolean;
@@ -72,11 +76,13 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
   members: [],
   events: [],
   inviteUrl: '',
+  realtimeStatus: 'idle',
   loading: false,
   error: '',
 
   init: async () => {
     if (isLocalOnlyMode()) {
+      unsubscribeProjectRealtime();
       saveCloudSession(null);
       const pendingChanges = await getCloudPendingChangeCount();
       set({
@@ -85,6 +91,7 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
         members: [],
         events: [],
         inviteUrl: '',
+        realtimeStatus: 'idle',
         syncState: {
           lastSyncedAt: null,
           pendingChanges,
@@ -152,7 +159,8 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
 
   signOut: () => {
     saveCloudSession(null);
-    set({ session: null, user: null, inviteUrl: '' });
+    unsubscribeProjectRealtime();
+    set({ session: null, user: null, inviteUrl: '', realtimeStatus: 'idle' });
   },
 
   deleteAccount: async () => {
@@ -169,6 +177,7 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
         members: [],
         events: [],
         inviteUrl: '',
+        realtimeStatus: 'idle',
         loading: false,
         syncState: {
           lastSyncedAt: null,
@@ -206,12 +215,37 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
       return;
     }
 
-    set({ syncState: { ...get().syncState, syncStatus: navigator.onLine ? 'syncing' : 'offline' }, error: '' });
+    const pendingBefore = await getCloudPendingChangeCount();
+    // Avoid a visible "pending 0 -> syncing -> synced" flicker during pull-only realtime refreshes.
+    set({
+      syncState: {
+        ...get().syncState,
+        pendingChanges: pendingBefore,
+        syncStatus: navigator.onLine ? (pendingBefore > 0 ? 'syncing' : get().syncState.syncStatus) : 'offline',
+      },
+      error: '',
+    });
     try {
       const syncState = await runCloudSync(session);
       set({ syncState });
+      await useAppStore.getState().loadProjects();
       const currentProjectId = useAppStore.getState().currentProjectId;
-      if (currentProjectId) await get().loadTeam(currentProjectId);
+      if (currentProjectId) {
+        await get().loadTeam(currentProjectId);
+        const [{ useTaskStore }, { useMilestoneStore }, { useTimelineStore }, { useDiaryStore }] = await Promise.all([
+          import('./useTaskStore'),
+          import('./useMilestoneStore'),
+          import('./useTimelineStore'),
+          import('./useDiaryStore'),
+        ]);
+        // Realtime writes land in IndexedDB first; reload every visible project store from that local truth.
+        await Promise.all([
+          useTaskStore.getState().load(currentProjectId),
+          useMilestoneStore.getState().load(currentProjectId),
+          useTimelineStore.getState().load(currentProjectId),
+          useDiaryStore.getState().load(currentProjectId),
+        ]);
+      }
     } catch (error) {
       const pendingChanges = await getCloudPendingChangeCount();
       set({
@@ -301,14 +335,23 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
       useToast.getState().add('当前处于单人纯净流，邀请成员前请切换到云协作模式。', 'warning');
       return;
     }
+    if (role === 'owner') {
+      useToast.getState().add('Owner 权限不能通过邀请授予，请使用“转让所有权”。', 'warning');
+      return;
+    }
     const session = get().session;
     if (session?.user.email === email) {
       useToast.getState().add('你不能邀请自己加入项目。', 'warning');
       return;
     }
     const project = await db.projects.get(projectId);
-    const userId = `email:${email}`;
+    let userId = `email:${email}`;
     if (session && project?.remoteProjectId) {
+      const remoteMembers = await fetchRemoteMembers(session, project.remoteProjectId).catch(() => []);
+      const existingRemote = remoteMembers.find(member => member.email?.toLowerCase() === email.toLowerCase());
+      if (existingRemote?.user_id) {
+        userId = existingRemote.user_id;
+      }
       await upsertRemoteMember(session, project.remoteProjectId, { userId, email, displayName: email, role, online: false, lastSeenAt: null });
     }
     const existing = await db.teamMembers.where({ projectId, userId }).first();
@@ -332,8 +375,13 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
   },
 
   updateMemberRole: async (memberId, role) => {
-    await db.teamMembers.update(memberId, { role });
     const member = await db.teamMembers.get(memberId);
+    if (!member) return;
+    if (member.role === 'owner' || role === 'owner') {
+      useToast.getState().add('Owner 权限不能在普通角色调整中修改，请使用“转让所有权”。', 'warning');
+      return;
+    }
+    await db.teamMembers.update(memberId, { role });
     if (member) {
       const project = await db.projects.get(member.projectId);
       const session = get().session;
@@ -405,6 +453,12 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
       set({ error: '当前处于单人纯净流，请先在设置中切换到云协作模式。' });
       return;
     }
+    if (role === 'owner') {
+      const message = 'Owner role cannot be granted by invite link. Use ownership transfer instead.';
+      set({ error: message });
+      useToast.getState().add(message, 'warning');
+      return;
+    }
     const project = await db.projects.get(projectId);
     set({ inviteUrl: project?.remoteProjectId ? buildRemoteInviteUrl(project.remoteProjectId, role) : buildInviteUrl(projectId, role) });
   },
@@ -436,22 +490,58 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
   joinProject: async (remoteProjectId, role) => {
     if (isLocalOnlyMode()) {
       set({ error: '当前处于单人纯净流，请先在设置中切换到云协作模式。' });
-      return;
+      throw new Error('当前处于单人纯净流，请先在设置中切换到云协作模式。');
     }
     const session = get().session;
     if (!session) {
       set({ error: '请先登录，再加入共享项目。' });
-      return;
+      throw new Error('请先登录，再加入共享项目。');
     }
     set({ loading: true, error: '' });
     try {
-      await joinRemoteProject(session, remoteProjectId, role);
+      const joinedProjectIds = await joinRemoteProject(session, remoteProjectId, role);
       await useAppStore.getState().loadProjects();
+      if (joinedProjectIds[0]) {
+        useAppStore.getState().setCurrentProject(joinedProjectIds[0]);
+      }
       await get().syncNow();
       set({ loading: false });
     } catch (error) {
-      set({ loading: false, error: error instanceof Error ? error.message : '加入共享项目失败' });
+      const message = error instanceof Error ? error.message : '加入共享项目失败';
+      set({ loading: false, error: message });
+      throw error;
     }
+  },
+
+  startRealtime: async (projectId) => {
+    if (isLocalOnlyMode() || !projectId) {
+      unsubscribeProjectRealtime();
+      set({ realtimeStatus: 'idle' });
+      return;
+    }
+
+    const session = get().session;
+    const project = await db.projects.get(projectId);
+    if (!session || !project?.remoteProjectId) {
+      unsubscribeProjectRealtime();
+      set({ realtimeStatus: 'idle' });
+      return;
+    }
+
+    subscribeProjectRealtime({
+      session,
+      remoteProjectId: project.remoteProjectId,
+      onChanged: () => {
+        get().syncNow().catch(() => undefined);
+      },
+      onStatus: realtimeStatus => set({ realtimeStatus }),
+      onError: message => set({ error: message }),
+    });
+  },
+
+  stopRealtime: () => {
+    unsubscribeProjectRealtime();
+    set({ realtimeStatus: 'idle' });
   },
 
   getRole: (projectId) => {

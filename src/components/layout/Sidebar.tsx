@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   AlarmClock,
   BarChart3,
@@ -11,10 +11,8 @@ import {
   ChevronDown,
   Cloud,
   DatabaseBackup,
-  FileText,
   Flag,
   FolderKanban,
-  FolderOpen,
   GitBranch,
   History,
   Home,
@@ -27,11 +25,14 @@ import {
   Stethoscope,
   Trophy,
   Upload,
+  UserCircle,
   Workflow,
-  Zap,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/useAppStore';
+import { useCloudStore } from '../../stores/useCloudStore';
+import { usePreferences } from '../../stores/usePreferences';
 import { useSidebarStore } from '../../stores/useSidebarStore';
+import { useToast } from '../../stores/useToast';
 import { PROJECT_COLORS, PROJECT_ICONS } from '../../types';
 import FocusTimerPanel from '../FocusTimer';
 import NotificationBell from '../NotificationBell';
@@ -40,8 +41,13 @@ import ProjectFolderIcon from '../ProjectFolderIcon';
 
 export default function Sidebar() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { projects, currentProjectId, setCurrentProject, addProject, updateProject } = useAppStore();
   const sidebarItems = useSidebarStore(state => state.items);
+  const session = useCloudStore(state => state.session);
+  const collaborationMode = usePreferences(state => state.collaborationMode);
+  const addToast = useToast(state => state.add);
+  const inviteLocked = location.pathname.startsWith('/invite') && !session;
 
   const [showSelector, setShowSelector] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -54,6 +60,7 @@ export default function Sidebar() {
   const [templateId, setTemplateId] = useState('');
 
   const currentProject = projects.find(project => project.id === currentProjectId);
+  const belongsToProject = (projectId: number) => (item: { projectId?: number | null }) => item.projectId === projectId;
 
   const navItems = [
     { to: '/today-command', icon: Route, label: '今日指挥台' },
@@ -70,11 +77,18 @@ export default function Sidebar() {
     { to: '/analytics', icon: BarChart3, label: '数据分析' },
     { to: '/gantt', icon: ChartNoAxesGantt, label: '甘特图' },
     { to: '/calendar', icon: CalendarDays, label: '日历' },
-    { to: '/sprints', icon: Zap, label: '冲刺管理' },
     { to: '/collaboration', icon: Cloud, label: '团队协作' },
     { to: '/collaboration-control', icon: Stethoscope, label: '协作诊断' },
     { to: '/ai-command', icon: Bot, label: 'AI 指令' },
   ];
+
+  const cloudOnlyRoutes = new Set(['/collaboration', '/collaboration-control']);
+  const visibleNavItems = navItems.filter(item => {
+    // Single-user mode hides collaboration pages at the code level, not through user sidebar prefs.
+    if (collaborationMode === 'local' && cloudOnlyRoutes.has(item.to)) return false;
+    const config = sidebarItems.find(s => s.to === item.to);
+    return !config || config.visible;
+  });
 
   const handleCreate = useCallback(async () => {
     if (!name.trim()) return;
@@ -112,15 +126,15 @@ export default function Sidebar() {
         if (data.projects) {
           for (const project of data.projects) {
             await db.projects.put(project);
-            if (data.tasks) await db.tasks.bulkPut(data.tasks.filter((task: any) => task.projectId === project.id));
+            if (data.tasks) await db.tasks.bulkPut(data.tasks.filter(belongsToProject(project.id)));
             if (data.milestones) {
-              await db.milestones.bulkPut(data.milestones.filter((milestone: any) => milestone.projectId === project.id));
+              await db.milestones.bulkPut(data.milestones.filter(belongsToProject(project.id)));
             }
             if (data.timelineEvents) {
-              await db.timelineEvents.bulkPut(data.timelineEvents.filter((item: any) => item.projectId === project.id));
+              await db.timelineEvents.bulkPut(data.timelineEvents.filter(belongsToProject(project.id)));
             }
             if (data.diaryEntries) {
-              await db.diaryEntries.bulkPut(data.diaryEntries.filter((entry: any) => entry.projectId === project.id));
+              await db.diaryEntries.bulkPut(data.diaryEntries.filter(belongsToProject(project.id)));
             }
           }
         }
@@ -140,12 +154,20 @@ export default function Sidebar() {
     setEditingDeadlineId(null);
   };
 
+  if (inviteLocked) return null;
+
   return (
     <aside className="flex h-screen w-[292px] shrink-0 flex-col border-r border-white/[0.05] bg-[#09111c]/95 backdrop-blur">
       <div className="flex items-center gap-2 border-b border-white/[0.05] p-4">
         <div className="relative flex-1">
           <button
-            onClick={() => setShowSelector(value => !value)}
+            onClick={() => {
+              if (inviteLocked) {
+                addToast('请先完成邀请登录，或在右下角切换单人纯净模式。', 'warning');
+                return;
+              }
+              setShowSelector(value => !value);
+            }}
             className="flex w-full items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-3 py-3 text-left transition hover:bg-white/[0.05]"
           >
             {currentProject ? <ProjectFolderIcon name={currentProject.name} color={currentProject.color} size="sm" /> : (
@@ -224,14 +246,18 @@ export default function Sidebar() {
 
       <nav className="flex-1 overflow-y-auto px-4 py-4">
         <div className="space-y-1">
-          {navItems.filter(item => {
-            const config = sidebarItems.find(s => s.to === item.to);
-            return !config || config.visible;
-          }).map(item => (
+          {visibleNavItems.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.end}
+              onClick={event => {
+                // Invitation auth is modal-like: sidebar navigation must not discard the signup flow.
+                if (inviteLocked) {
+                  event.preventDefault();
+                  addToast('请先完成邀请登录，或在右下角切换单人纯净模式。', 'warning');
+                }
+              }}
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
                   isActive
@@ -268,6 +294,12 @@ export default function Sidebar() {
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  onClick={event => {
+                    if (inviteLocked) {
+                      event.preventDefault();
+                      addToast('请先完成邀请登录，或在右下角切换单人纯净模式。', 'warning');
+                    }
+                  }}
                   className={({ isActive }) =>
                     `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
                       isActive
@@ -297,13 +329,26 @@ export default function Sidebar() {
           <FocusTimerPanel />
         </div>
 
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-2">
+        <div className="grid grid-cols-2 gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-2">
           <button
-            onClick={() => navigate('/settings')}
-            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-slate-300 transition hover:bg-white/[0.04] hover:text-white"
+            onClick={() => {
+              if (inviteLocked) {
+                addToast('请先完成邀请登录，或在右下角切换单人纯净模式。', 'warning');
+                return;
+              }
+              navigate('/settings');
+            }}
+            className="flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm text-slate-300 transition hover:bg-white/[0.04] hover:text-white"
           >
             <Settings size={15} />
             设置
+          </button>
+          <button
+            onClick={() => navigate('/account')}
+            className="flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm text-slate-300 transition hover:bg-white/[0.04] hover:text-white"
+          >
+            <UserCircle size={15} />
+            账户
           </button>
         </div>
       </div>

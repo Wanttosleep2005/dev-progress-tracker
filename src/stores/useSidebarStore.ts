@@ -36,7 +36,6 @@ const DEFAULT_ITEMS: Array<Omit<SidebarItem, 'visible'>> = [
   { to: '/gantt', label: '甘特图', weight: 50, reason: '排期视图，适合阶段性规划' },
   { to: '/portfolio', label: '项目总览', weight: 48, reason: '多项目管理时使用' },
   { to: '/focus-sessions', label: '专注记录', weight: 46, reason: '统计明细，番茄钟已覆盖入口' },
-  { to: '/sprints', label: '冲刺管理', weight: 44, reason: '偏敏捷流程，小团队可按需开启' },
   { to: '/dependencies', label: '任务依赖', weight: 42, reason: '复杂任务网络时使用' },
   { to: '/achievements', label: '成就系统', weight: 30, reason: '激励型模块，不占默认导航' },
 ];

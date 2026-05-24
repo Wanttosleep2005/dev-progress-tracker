@@ -8,6 +8,7 @@ import {
   LineElement,
   PointElement,
   Tooltip,
+  type ChartData,
 } from 'chart.js';
 import { Line, Pie } from 'react-chartjs-2';
 import { Activity, Sparkles } from 'lucide-react';
@@ -15,8 +16,8 @@ import { Activity, Sparkles } from 'lucide-react';
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler);
 
 interface OverviewChartsProps {
-  pieData: any;
-  weeklyTrend: any;
+  pieData: ChartData<'pie'>;
+  weeklyTrend: ChartData<'line'>;
 }
 
 const chartOptions = {

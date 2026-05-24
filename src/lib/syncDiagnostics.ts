@@ -97,7 +97,7 @@ export async function buildSyncDiagnostics(params: {
     {
       key: 'role',
       label: '当前权限',
-      status: params.role === 'owner' || (!project?.remoteProjectId && params.currentProjectId) ? 'ok' : 'fail',
+      status: params.role === 'owner' || params.role === 'editor' || params.role === 'viewer' || (!project?.remoteProjectId && params.currentProjectId) ? 'ok' : 'fail',
       detail: params.role ? `当前角色：${params.role}` : project?.remoteProjectId ? '未找到当前用户成员角色' : '本地未共享项目视为所有者',
     },
     {

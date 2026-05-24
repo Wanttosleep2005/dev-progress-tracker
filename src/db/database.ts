@@ -15,6 +15,7 @@ import type {
   TeamMember,
   TimelineEvent,
   User,
+  UserSetting,
 } from '../types';
 
 class DevTrackDatabase extends Dexie {
@@ -32,6 +33,7 @@ class DevTrackDatabase extends Dexie {
   inviteLinks!: Table<InviteLink, number>;
   sprints!: Table<Sprint, number>;
   comments!: Table<TaskComment, number>;
+  userSettings!: Table<UserSetting, number>;
 
   constructor() {
     super('DevTrackDB');
@@ -134,6 +136,28 @@ class DevTrackDatabase extends Dexie {
           if (!('pomodoroGoal' in task)) patch.pomodoroGoal = null;
           if (Object.keys(patch).length > 0) {
             await tx.table('tasks').update(task.id, patch);
+          }
+        }
+      });
+
+    this.version(13)
+      .stores({
+        diaryEntries: '++id, projectId, date, createdBy, [projectId+date+createdBy]',
+        sprints: '++id, projectId, status, startDate, endDate, createdBy',
+        userSettings: '++id, userId, key, [userId+key]',
+      })
+      .upgrade(async tx => {
+        const diaryEntries = await tx.table('diaryEntries').toArray();
+        for (const entry of diaryEntries) {
+          if (!('createdBy' in entry)) {
+            await tx.table('diaryEntries').update(entry.id, { createdBy: null });
+          }
+        }
+
+        const sprints = await tx.table('sprints').toArray();
+        for (const sprint of sprints) {
+          if (!('createdBy' in sprint)) {
+            await tx.table('sprints').update(sprint.id, { createdBy: null });
           }
         }
       });
@@ -380,22 +404,32 @@ export async function getDiaryByProject(projectId: number): Promise<DiaryEntry[]
   return db.diaryEntries.where('projectId').equals(projectId).toArray();
 }
 
-export async function getDiaryEntry(projectId: number, date: string): Promise<DiaryEntry | undefined> {
-  return db.diaryEntries.where({ projectId, date }).first();
+export async function getDiaryEntry(projectId: number, date: string, createdBy: string | null = null): Promise<DiaryEntry | undefined> {
+  return db.diaryEntries
+    .where('projectId')
+    .equals(projectId)
+    .filter(entry => entry.date === date && (entry.createdBy ?? null) === createdBy)
+    .first();
 }
 
 export async function upsertDiaryEntry(entry: Omit<DiaryEntry, 'id' | 'createdAt' | 'updatedAt'>): Promise<number> {
-  const existing = await db.diaryEntries.where({ projectId: entry.projectId, date: entry.date }).first();
+  const createdBy = entry.createdBy ?? null;
+  const existing = await db.diaryEntries
+    .where('projectId')
+    .equals(entry.projectId)
+    .filter(item => item.date === entry.date && (item.createdBy ?? null) === createdBy)
+    .first();
   const now = new Date().toISOString();
+  const nextEntry = { ...entry, createdBy };
 
   if (existing?.id) {
-    await db.diaryEntries.update(existing.id, { ...entry, updatedAt: now });
+    await db.diaryEntries.update(existing.id, { ...nextEntry, updatedAt: now });
     const after = await db.diaryEntries.get(existing.id);
     if (after) await queueSyncChange('diaryEntries', existing.id, entry.projectId, 'upsert', after as unknown as Record<string, unknown>, existing.updatedAt);
     return existing.id;
   }
 
-  const record = { ...entry, createdAt: now, updatedAt: now };
+  const record = { ...nextEntry, createdAt: now, updatedAt: now };
   const id = await db.diaryEntries.add(record);
   await queueSyncChange('diaryEntries', id, entry.projectId, 'upsert', { ...record, id }, null);
   return id;
@@ -452,32 +486,25 @@ export async function clearNotifications(): Promise<void> {
   await db.notifications.clear();
 }
 
-// Sprint CRUD
-export async function getSprintsByProject(projectId: number): Promise<Sprint[]> {
-  return db.sprints.where('projectId').equals(projectId).toArray();
+export async function getUserSetting(userId: string, key: string): Promise<string> {
+  const setting = await db.userSettings.where('[userId+key]').equals([userId, key]).first();
+  return setting?.value ?? '';
 }
 
-export async function addSprint(sprint: Omit<Sprint, 'id' | 'createdAt' | 'updatedAt'>): Promise<number> {
+export async function setUserSetting(userId: string, key: string, value: string): Promise<void> {
   const now = new Date().toISOString();
-  const record = { ...sprint, createdAt: now, updatedAt: now };
-  const id = await db.sprints.add(record);
-  await queueSyncChange('sprints', id, sprint.projectId, 'upsert', { ...record, id }, null);
-  return id;
-}
-
-export async function updateSprint(id: number, changes: Partial<Sprint>): Promise<number> {
-  const before = await db.sprints.get(id);
-  const result = await db.sprints.update(id, { ...changes, updatedAt: new Date().toISOString() });
-  const after = await db.sprints.get(id);
-  if (after) await queueSyncChange('sprints', id, after.projectId, 'upsert', after as unknown as Record<string, unknown>, before?.updatedAt ?? null);
-  return result;
-}
-
-export async function deleteSprint(id: number): Promise<void> {
-  const before = await db.sprints.get(id);
-  await db.tasks.where('sprintId').equals(id).modify({ sprintId: null });
-  await db.sprints.delete(id);
-  await queueSyncChange('sprints', id, before?.projectId ?? null, 'delete', { id }, before?.updatedAt ?? null);
+  const existing = await db.userSettings.where('[userId+key]').equals([userId, key]).first();
+  if (existing?.id) {
+    if (value) {
+      await db.userSettings.update(existing.id, { value, updatedAt: now });
+    } else {
+      await db.userSettings.delete(existing.id);
+    }
+    return;
+  }
+  if (value) {
+    await db.userSettings.add({ userId, key, value, updatedAt: now });
+  }
 }
 
 // Comment CRUD

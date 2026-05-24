@@ -74,11 +74,21 @@ export default function OwnerControlCenter({ isOwner }: { isOwner: boolean }) {
   const [report, setReport] = useState<SyncDiagnosticsReport | null>(null);
   const [message, setMessage] = useState('');
   const [memberPage, setMemberPage] = useState(1);
+  const [backupDirectory, setBackupDirectory] = useState('');
 
   const role = useMemo(() => getRole(currentProjectId), [currentProjectId, getRole, members]);
   const inviteBase = getCustomBaseUrl() || window.location.origin;
-  const backupDirectory = getBackupDirectoryLabel();
   const pagedMembers = members.slice((memberPage - 1) * MEMBER_PAGE_SIZE, memberPage * MEMBER_PAGE_SIZE);
+
+  useEffect(() => {
+    let cancelled = false;
+    getBackupDirectoryLabel().then(label => {
+      if (!cancelled) setBackupDirectory(label);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const setupSteps = [
     {

@@ -1,14 +1,75 @@
 # Changelog
 
+## v1.0.0 - 2026-05-24
+
+DevTrack 1.0 is the first stable local-first release for individual developers
+and small-team project development monitoring.
+
+### Added
+
+- Added a bilingual README with Chinese and English setup, mode, and
+  distribution notes.
+- Added Chinese and English user guides:
+  - `docs/USER_GUIDE.zh-CN.md`
+  - `docs/USER_GUIDE.en.md`
+- Added a bilingual contribution guide in `CONTRIBUTING.md`.
+- Added an account page separated from Settings.
+- Added local-only and cloud-collaboration mode guidance.
+- Added Supabase Realtime synchronization with a slower REST fallback when
+  Realtime is healthy.
+- Added shared-project invite flow, role-based collaboration, team activity
+  pagination, Owner control center, permission audit, and sync diagnostics.
+- Added diary export to Markdown for current-month or all entries.
+- Added task dependency graph support using React Flow.
+- Added backup/recovery improvements, user-scoped backup directory settings,
+  and safer restore-point handling.
+
+### Changed
+
+- Bumped package version to `1.0.0`.
+- Reduced idle Supabase traffic:
+  - Realtime-connected fallback sync now runs every 5 minutes.
+  - Disconnected/error fallback remains at 60 seconds.
+  - Presence refresh is throttled.
+- Moved account login/register/logout out of the collaboration page.
+- Kept Settings focused on preferences, sync status, network access, backup, and
+  system information.
+- Updated Supabase SQL setup and migrations for project sharing, editor sync
+  permissions, Realtime, join-project safety, and account deletion support.
+- Improved local/cloud relationship mapping for tasks, milestones, diaries, and
+  comments.
+
+### Removed
+
+- Removed the Sprint management product surface because it caused unnecessary
+  duplication and sync complexity for the intended small-team workflow.
+- Removed the Sprint route, sidebar item, page component, store, achievement,
+  and cloud-sync handling.
+- Kept the legacy `sprints` IndexedDB table and backup field for compatibility
+  with older local data and restore files.
+
+### Security
+
+- `.env` remains ignored and must not be committed.
+- `.env.example` contains only placeholder values.
+- The frontend still never stores or bundles a Supabase `service_role` key.
+- Account deletion remains beta; use a spare account or manual Supabase
+  Dashboard flow before trusting it with real team data.
+
+### Verification
+
+- `npx tsc --noEmit --pretty false`
+- `npm run build`
+
 ## v0.9.1 - 2026-05-23
 
 ### Added
 
-- Added `单人纯净流` in Settings. This mode disables Supabase login, cloud sync,
-  member invites, and presence heartbeats while keeping local IndexedDB workflows
-  available.
-- Added `云协作模式` as an explicit switch for teams that want Supabase-backed
-  sharing and synchronization.
+- Added local-only mode in Settings. This mode disables Supabase login, cloud
+  sync, member invites, and presence heartbeats while keeping local IndexedDB
+  workflows available.
+- Added cloud-collaboration mode as an explicit switch for teams that want
+  Supabase-backed sharing and synchronization.
 - Added account deletion beta documentation:
   - `docs/supabase-edge-function-account-deletion.md`
   - `docs/manual-account-deletion.md`
@@ -17,7 +78,6 @@
 
 ### Changed
 
-- Bumped version to `0.9.1`.
 - Rewrote README with a local-first explanation, mode guidance, Supabase setup,
   and account deletion beta warning.
 - Moved SQL files into `supabase/sql/` and removed obsolete presence/reset SQL
@@ -27,11 +87,8 @@
 
 ### Security
 
-- The frontend still never stores or bundles a Supabase service-role key.
 - Account deletion uses `DEVTRACK_SUPABASE_*` Edge Function secrets because
   Supabase CLI rejects custom secrets starting with `SUPABASE_`.
-- Account deletion remains beta and should be tested with disposable accounts
-  before use on real team data.
 
 ## v0.9.0 - 2026-05-23
 

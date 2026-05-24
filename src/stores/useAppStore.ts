@@ -97,8 +97,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const allSessionsStr = localStorage.getItem('devtrack-focus-sessions');
     const allSessions = allSessionsStr ? JSON.parse(allSessionsStr) : [];
     const totalFocusMinutes = allSessions.reduce((sum: number, s: any) => sum + (s.seconds || 0) / 60, 0);
-    const allComments = await db.db.comments.toArray();
-    const allSprints = await db.db.sprints.toArray();
 
     // Count diary streak
     const dates = new Set(allDiaryEntries.map(e => e.date));
@@ -164,7 +162,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       five_milestones: allMilestones.filter(m => m.status === 'completed').length >= 5,
       all_tags: allTags.size >= 10,
       est_accurate: estAccurateTasks.length >= 10,
-      sprint_master: allSprints.filter(s => s.status === 'completed').length > 0,
       // Gold
       streak_60: streak >= 60,
       hundred_tasks: doneTasks.length >= 100,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Search, Sparkles } from 'lucide-react';
 import Sidebar from './Sidebar';
@@ -18,6 +18,10 @@ import { analyzeProjectRisk, formatRiskToast } from '../../lib/riskAnalysis';
 import { useInitPreferences, usePreferences } from '../../stores/usePreferences';
 import { useCloudStore } from '../../stores/useCloudStore';
 import { useNotificationStore } from '../../stores/useNotificationStore';
+
+const CLOUD_FALLBACK_SYNC_MS = 60_000;
+const CLOUD_CONNECTED_FALLBACK_SYNC_MS = 300_000;
+const PRESENCE_TOUCH_THROTTLE_MS = 120_000;
 
 const PAGE_TITLES: Record<string, string> = {
   '/today-command': '今日指挥台',
@@ -39,6 +43,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/ai-command': 'AI 指令中心',
   '/projects': '项目管理',
   '/settings': '设置',
+  '/account': '账户',
 };
 
 function toLocalDateTimeMinute(value: string | null) {
@@ -75,12 +80,17 @@ export default function Layout() {
   const syncNow = useCloudStore(state => state.syncNow);
   const touchPresence = useCloudStore(state => state.touchPresence);
   const syncState = useCloudStore(state => state.syncState);
+  const session = useCloudStore(state => state.session);
+  const realtimeStatus = useCloudStore(state => state.realtimeStatus);
+  const startRealtime = useCloudStore(state => state.startRealtime);
+  const stopRealtime = useCloudStore(state => state.stopRealtime);
   const loadTeam = useCloudStore(state => state.loadTeam);
   const collaborationMode = usePreferences(state => state.collaborationMode);
   const initNotifications = useNotificationStore(state => state.init);
   const checkTaskNotifications = useNotificationStore(state => state.checkTaskNotifications);
   const [riskToastCache] = useState<Set<string>>(() => new Set());
   const [taskToastCache] = useState<Set<string>>(() => new Set());
+  const lastPresenceTouchRef = useRef(0);
 
   useEffect(() => {
     useStatsStore.getState().loadSessions();
@@ -89,24 +99,35 @@ export default function Layout() {
   }, [initCloud, initNotifications, collaborationMode]);
 
   useEffect(() => {
+    if (collaborationMode !== 'cloud' || !session) return;
+    const touchPresenceThrottled = () => {
+      const now = Date.now();
+      if (now - lastPresenceTouchRef.current < PRESENCE_TOUCH_THROTTLE_MS) return;
+      lastPresenceTouchRef.current = now;
+      touchPresence();
+    };
     const handleOnline = () => syncNow();
     const handleVisible = () => {
-      if (document.visibilityState === 'visible') touchPresence();
+      if (document.visibilityState === 'visible') touchPresenceThrottled();
     };
-    const handleFocus = () => touchPresence();
+    const handleFocus = () => touchPresenceThrottled();
     window.addEventListener('online', handleOnline);
     window.addEventListener('focus', handleFocus);
     document.addEventListener('visibilitychange', handleVisible);
+    // Realtime is the primary path; a full REST sync is only a slow safety net while connected.
+    const intervalMs = realtimeStatus === 'connected' || realtimeStatus === 'syncing'
+      ? CLOUD_CONNECTED_FALLBACK_SYNC_MS
+      : CLOUD_FALLBACK_SYNC_MS;
     const timer = setInterval(() => {
       syncNow();
-    }, 60000);
+    }, intervalMs);
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisible);
       clearInterval(timer);
     };
-  }, [syncNow, touchPresence]);
+  }, [collaborationMode, realtimeStatus, session, syncNow, touchPresence]);
 
   useEffect(() => {
     loadProjects();
@@ -127,6 +148,15 @@ export default function Layout() {
     loadDiary(currentProjectId);
     loadTeam(currentProjectId);
   }, [currentProjectId, loadTasks, loadMilestones, loadTimeline, loadDiary, loadTeam]);
+
+  useEffect(() => {
+    if (collaborationMode !== 'cloud' || !session || !currentProjectId) {
+      stopRealtime();
+      return;
+    }
+    startRealtime(currentProjectId);
+    return () => stopRealtime();
+  }, [collaborationMode, currentProjectId, session, startRealtime, stopRealtime]);
 
   useEffect(() => {
     if (!currentProjectId) return;
@@ -198,14 +228,28 @@ export default function Layout() {
   }, [currentProjectId, projects, taskItems, milestoneItems, diaryEntries, riskToastCache, addToast]);
 
   const currentProject = useMemo(() => projects.find(project => project.id === currentProjectId), [projects, currentProjectId]);
+  const inviteAuthOnly = location.pathname.startsWith('/invite') && !session;
   const pageTitle = PAGE_TITLES[location.pathname] ?? '项目工作监控系统';
+  const realtimeLabel = collaborationMode !== 'cloud'
+    ? '实时关闭'
+    : realtimeStatus === 'connected'
+      ? '实时已连接'
+      : realtimeStatus === 'syncing'
+        ? '实时同步中'
+        : realtimeStatus === 'connecting'
+          ? '实时连接中'
+          : realtimeStatus === 'error'
+            ? '实时异常'
+            : realtimeStatus === 'disconnected'
+              ? '实时断开'
+              : '实时待机';
 
   return (
     <div className="flex h-screen overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(39,138,255,0.14),_transparent_28%),linear-gradient(180deg,_#05070d_0%,_#0b1220_100%)]">
-      <Sidebar />
+      {!inviteAuthOnly && <Sidebar />}
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="border-b border-white/[0.05] bg-[#0a1320]/78 px-4 py-4 backdrop-blur xl:px-6">
+        {!inviteAuthOnly && <header className="border-b border-white/[0.05] bg-[#0a1320]/78 px-4 py-4 backdrop-blur xl:px-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-[0.22em] text-slate-500">
@@ -240,6 +284,22 @@ export default function Layout() {
                         ? '存在冲突'
                         : '离线'}
               </div>
+              {collaborationMode === 'cloud' && (
+                <div className="flex items-center gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-xs text-slate-400">
+                  <span
+                    className={`h-2 w-2 rounded-full ${
+                      realtimeStatus === 'connected'
+                        ? 'bg-emerald-400'
+                        : realtimeStatus === 'syncing' || realtimeStatus === 'connecting'
+                          ? 'bg-cyan-400'
+                          : realtimeStatus === 'error'
+                            ? 'bg-amber-400'
+                            : 'bg-slate-500'
+                    }`}
+                  />
+                  {realtimeLabel}
+                </div>
+              )}
               <div className="relative w-full sm:w-[340px]">
                 <Search size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
@@ -252,15 +312,15 @@ export default function Layout() {
               </div>
             </div>
           </div>
-        </header>
+        </header>}
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-5 xl:px-6">
           <Outlet />
         </main>
       </div>
 
-      <CommandPalette />
-      <QuickActions />
+      {!inviteAuthOnly && <CommandPalette />}
+      {!inviteAuthOnly && <QuickActions />}
       <div className="pointer-events-none fixed bottom-24 left-1/2 z-50 flex w-[min(420px,calc(100vw-32px))] -translate-x-1/2 flex-col gap-3">
         {toasts.map(toast => (
           <div key={toast.id} className="pointer-events-auto">

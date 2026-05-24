@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { DatabaseBackup, Download, FileCheck2, HardDrive, RotateCcw, ShieldCheck, Upload } from 'lucide-react';
 import { backupSummary, createBackup, getBackupDirectoryLabel, restoreBackup, validateBackup, writeBackupToConfiguredDirectory, type DevTrackBackup } from '../lib/backup';
+import { createClientId } from '../lib/id';
 
 interface RestorePointMeta {
   id: string;
@@ -40,8 +41,18 @@ export default function BackupRecovery() {
   const [message, setMessage] = useState('');
   const [restorePoints, setRestorePoints] = useState<RestorePointMeta[]>(() => readRestorePoints());
   const [preview, setPreview] = useState<DevTrackBackup | null>(null);
-  const [backupDirectory] = useState(() => getBackupDirectoryLabel());
+  const [backupDirectory, setBackupDirectoryLabel] = useState('');
   const previewSummary = useMemo(() => preview ? backupSummary(preview) : null, [preview]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getBackupDirectoryLabel().then(label => {
+      if (!cancelled) setBackupDirectoryLabel(label);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleExport = async () => {
     const backup = await createBackup();
@@ -52,7 +63,7 @@ export default function BackupRecovery() {
   const handleCreateRestorePoint = async () => {
     try {
       const backup = await createBackup();
-      const id = crypto.randomUUID();
+      const id = createClientId();
       const meta: RestorePointMeta = {
         id,
         name: `还原点 ${new Date().toLocaleString('zh-CN')}`,

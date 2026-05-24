@@ -11,6 +11,7 @@ import {
   RadarController,
   RadialLinearScale,
   Tooltip,
+  type ChartData,
 } from 'chart.js';
 import { Bar, Doughnut, Line, Radar } from 'react-chartjs-2';
 import { BarChart3, Gauge, Radar as RadarIcon, Sparkles, TimerReset, TrendingUp } from 'lucide-react';
@@ -44,12 +45,12 @@ const baseChartOptions = {
 };
 
 interface AnalyticsChartsProps {
-  dailyFocusTrend: any;
-  statusData: any;
-  effortData: any;
-  priorityData: any;
-  weeklyDeliveryData: any;
-  moodTrend: any;
+  dailyFocusTrend: ChartData<'line'>;
+  statusData: ChartData<'doughnut'>;
+  effortData: ChartData<'bar'>;
+  priorityData: ChartData<'bar'>;
+  weeklyDeliveryData: ChartData<'radar'>;
+  moodTrend: ChartData<'line'>;
 }
 
 export default function AnalyticsCharts({

@@ -1,17 +1,28 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BookOpen, CalendarDays, ChevronLeft, ChevronRight, Edit3, Eye, FilePlus, Flame, Hash, Save, Tag, Trash2, Upload } from 'lucide-react';
+import { BookOpen, CalendarDays, ChevronLeft, ChevronRight, Download, Edit3, Eye, FilePlus, Flame, Hash, Save, Tag, Trash2, Upload } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { useAppStore } from '../stores/useAppStore';
 import { useDiaryStore } from '../stores/useDiaryStore';
+import { useCloudStore } from '../stores/useCloudStore';
 import { useToast } from '../stores/useToast';
 import { MOOD_COLORS, MOOD_LABELS } from '../types';
 import type { DiaryEntry, MoodType } from '../types';
 import { db } from '../db/database';
 
 const MOODS: MoodType[] = ['great', 'good', 'meh', 'bad', 'terrible'];
+const AUTHOR_COLORS = ['bg-sky-400', 'bg-emerald-400', 'bg-violet-400', 'bg-amber-400', 'bg-rose-400', 'bg-cyan-400'];
+const WEEKDAY_LABELS = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+
+function toLocalDateKey(date: Date) {
+  // Calendar days are local UI concepts; UTC ISO keys shift one day in Asia/Shanghai.
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 const DAY_NAMES = ['一', '二', '三', '四', '五', '六', '日'];
 
 function countStreak(entries: DiaryEntry[]): number {
@@ -29,9 +40,23 @@ function totalWords(entries: DiaryEntry[]): number {
   return entries.reduce((sum, e) => sum + (e.content.trim() ? e.content.split(/\s+/).length : 0), 0);
 }
 
+function getAuthorColor(authorId?: string | null) {
+  const key = authorId || 'local';
+  const sum = [...key].reduce((total, char) => total + char.charCodeAt(0), 0);
+  return AUTHOR_COLORS[sum % AUTHOR_COLORS.length];
+}
+
+function compactAuthorLabel(value?: string | null) {
+  if (!value) return '本地';
+  if (value.includes('@')) return value.split('@')[0].slice(0, 8);
+  return value.slice(0, 8);
+}
+
 export default function Diary() {
   const currentProjectId = useAppStore(state => state.currentProjectId);
   const { entries, upsert, remove, load } = useDiaryStore();
+  const currentUser = useCloudStore(state => state.user);
+  const members = useCloudStore(state => state.members);
   const { add: addToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -42,9 +67,26 @@ export default function Diary() {
   const [mood, setMood] = useState<MoodType>('meh');
   const [tags, setTags] = useState('');
   const [importing, setImporting] = useState(false);
+  const [selectedEntryId, setSelectedEntryId] = useState<number | null>(null);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
-  const dateStr = currentDate.toISOString().split('T')[0];
-  const currentEntry = useMemo(() => entries.find(entry => entry.date === dateStr), [entries, dateStr]);
+  const dateStr = toLocalDateKey(currentDate);
+  const authorById = useMemo(() => {
+    const map = new Map<string, string>();
+    members.forEach(member => map.set(member.userId, member.displayName || member.email || member.userId));
+    if (currentUser) map.set(currentUser.id, currentUser.displayName || currentUser.email);
+    return map;
+  }, [currentUser, members]);
+  const getAuthorLabel = useCallback((entry: DiaryEntry) => (
+    compactAuthorLabel(entry.createdBy ? authorById.get(entry.createdBy) || entry.createdBy : '本地')
+  ), [authorById]);
+  const entriesForDate = useMemo(() => entries.filter(entry => entry.date === dateStr), [entries, dateStr]);
+  const ownEntry = useMemo(() => entriesForDate.find(entry => (
+    currentUser?.id ? entry.createdBy === currentUser.id : !entry.createdBy
+  )), [currentUser?.id, entriesForDate]);
+  const currentEntry = useMemo(() => (
+    entriesForDate.find(entry => entry.id === selectedEntryId) ?? ownEntry ?? entriesForDate[0]
+  ), [entriesForDate, ownEntry, selectedEntryId]);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -77,47 +119,60 @@ export default function Diary() {
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
   }, [entries]);
 
-  const hasEntry = useCallback((day: number) =>
-    entries.some(e => e.date === `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`),
-  [entries, month, year]);
-
-  const getEntryMood = useCallback((day: number) =>
-    entries.find(e => e.date === `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`)?.mood,
+  const getDayEntries = useCallback((day: number) =>
+    entries.filter(e => e.date === toLocalDateKey(new Date(year, month, day))),
   [entries, month, year]);
 
   const navigateMonth = (delta: number) => setCurrentDate(new Date(year, month + delta, 1));
-  const selectDay = (day: number) => { setCurrentDate(new Date(year, month, day)); setEditing(false); setPreviewMode(false); };
-  const selectRecentEntry = (entry: DiaryEntry) => { setCurrentDate(new Date(entry.date)); setEditing(false); setPreviewMode(false); };
+  const selectDay = (day: number) => {
+    // Reset cached editor state so an empty day never renders the previous day's draft.
+    setCurrentDate(new Date(year, month, day));
+    setSelectedEntryId(null);
+    setContent('');
+    setMood('meh');
+    setTags('');
+    setEditing(false);
+    setPreviewMode(false);
+  };
+  const selectRecentEntry = (entry: DiaryEntry) => { setCurrentDate(new Date(entry.date)); setSelectedEntryId(entry.id ?? null); setEditing(false); setPreviewMode(false); };
 
   const startEditing = () => {
-    setContent(currentEntry?.content || '');
-    setMood(currentEntry?.mood || 'meh');
-    setTags(currentEntry?.tags.join(', ') || '');
+    const editableEntry = ownEntry ?? (!currentUser?.id && currentEntry && !currentEntry.createdBy ? currentEntry : undefined);
+    setContent(editableEntry?.content || '');
+    setMood(editableEntry?.mood || 'meh');
+    setTags(editableEntry?.tags.join(', ') || '');
+    setSelectedEntryId(editableEntry?.id ?? null);
     setEditing(true);
     setPreviewMode(false);
   };
 
   const handleSave = useCallback(async () => {
     if (!currentProjectId && !currentEntry?.projectId) return;
-    await upsert({
-      projectId: currentEntry?.projectId ?? currentProjectId!,
+    const id = await upsert({
+      projectId: ownEntry?.projectId ?? currentEntry?.projectId ?? currentProjectId!,
       date: dateStr,
       content: content.trim(),
       mood,
       tags: tags.split(',').map(t => t.trim()).filter(Boolean),
     });
+    if (id) setSelectedEntryId(id);
     setEditing(false);
-  }, [content, currentEntry?.projectId, currentProjectId, dateStr, mood, tags, upsert]);
+  }, [content, currentEntry?.projectId, currentProjectId, dateStr, mood, ownEntry?.projectId, tags, upsert]);
 
   const handleDelete = useCallback(async () => {
     if (currentEntry?.id) {
+      if (currentUser?.id && currentEntry.createdBy && currentEntry.createdBy !== currentUser.id) {
+        addToast('不能删除其他成员的日志', 'warning');
+        return;
+      }
       await remove(currentEntry.id);
+      setSelectedEntryId(null);
       setEditing(false);
       setContent('');
       setMood('meh');
       setTags('');
     }
-  }, [currentEntry, remove]);
+  }, [addToast, currentEntry, currentUser?.id, remove]);
 
   const handleImport = async () => {
     const input = fileInputRef.current;
@@ -145,8 +200,8 @@ export default function Diary() {
           }
         } else if (file.name.endsWith('.md')) {
           const dateMatch = file.name.match(/(\d{4}-\d{2}-\d{2})/);
-          const date = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
-          const existing = entries.find(e => e.date === date);
+          const date = dateMatch ? dateMatch[1] : toLocalDateKey(new Date());
+          const existing = entries.find(e => e.date === date && (currentUser?.id ? e.createdBy === currentUser.id : !e.createdBy));
           if (existing) {
             setContent(existing.content ? `${existing.content}\n\n---\n\n${text}` : text);
             setEditing(true);
@@ -165,8 +220,37 @@ export default function Diary() {
     input.value = '';
   };
 
+  const handleExportDiary = useCallback((scope: 'month' | 'all') => {
+    const sourceEntries = scope === 'month' ? monthlyEntries : entries;
+    const sortedEntries = [...sourceEntries].sort((a, b) => (
+      a.date.localeCompare(b.date) || getAuthorLabel(a).localeCompare(getAuthorLabel(b))
+    ));
+    if (sortedEntries.length === 0) {
+      setExportMenuOpen(false);
+      addToast('没有可导出的日志', 'warning');
+      return;
+    }
+    const markdown = sortedEntries.map(entry => {
+      const entryDate = new Date(`${entry.date}T00:00:00`);
+      const weekday = WEEKDAY_LABELS[entryDate.getDay()] ?? '';
+      const body = entry.content.trim() || '_空日志_';
+      return `# ${entry.date} (${weekday}) ${MOOD_LABELS[entry.mood]} ${getAuthorLabel(entry)}\n\n${body}\n\n---`;
+    }).join('\n\n');
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = scope === 'month'
+      ? `devtrack-diary-${year}-${String(month + 1).padStart(2, '0')}.md`
+      : 'devtrack-diary-all.md';
+    link.click();
+    URL.revokeObjectURL(url);
+    setExportMenuOpen(false);
+    addToast('日志导出成功', 'success');
+  }, [addToast, entries, getAuthorLabel, month, monthlyEntries, year]);
+
   const today = new Date();
-  const isToday = dateStr === today.toISOString().split('T')[0];
+  const isToday = dateStr === toLocalDateKey(today);
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mx-auto max-w-7xl space-y-5">
@@ -178,12 +262,34 @@ export default function Diary() {
           <p className="mt-1 text-sm text-slate-400">沉淀每日开发轨迹，支持 Markdown 编辑与文件导入。</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <button onClick={() => setExportMenuOpen(value => !value)} className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2.5 text-sm text-slate-300 hover:bg-white/[0.05]">
+              <Download size={14} /> 导出日志
+            </button>
+            <AnimatePresence>
+              {exportMenuOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  className="absolute right-0 top-full z-20 mt-2 w-40 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0b1422] p-1 shadow-2xl shadow-black/30"
+                >
+                  <button onClick={() => handleExportDiary('month')} className="w-full rounded-xl px-3 py-2 text-left text-xs text-slate-300 hover:bg-white/[0.06]">
+                    导出本月日志
+                  </button>
+                  <button onClick={() => handleExportDiary('all')} className="w-full rounded-xl px-3 py-2 text-left text-xs text-slate-300 hover:bg-white/[0.06]">
+                    导出全部日志
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <button onClick={() => fileInputRef.current?.click()} disabled={importing || !currentProjectId} className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2.5 text-sm text-slate-300 hover:bg-white/[0.05] disabled:opacity-50">
             <Upload size={14} /> 导入 MD/JSON
           </button>
           {!editing && (
             <button onClick={startEditing} className="flex items-center gap-2 rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-600">
-              <Edit3 size={14} /> {currentEntry ? '编辑' : '写日志'}
+              <Edit3 size={14} /> {ownEntry ? '编辑我的日志' : '写我的日志'}
             </button>
           )}
         </div>
@@ -221,7 +327,8 @@ export default function Diary() {
             <div className="grid grid-cols-7 gap-1">
               {calendarDays.map((day, i) => {
                 if (!day) return <div key={`e-${i}`} className="aspect-square" />;
-                const moodColor = getEntryMood(day);
+                const dayEntries = getDayEntries(day);
+                const moodMarks = dayEntries.slice(0, 4);
                 const selected = day === currentDate.getDate() && month === currentDate.getMonth();
                 const todayDate = day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
                 return (
@@ -235,10 +342,18 @@ export default function Diary() {
                   >
                     <div className="flex h-full flex-col items-center justify-center">
                       {day}
-                      {moodColor && <span className="text-[10px] leading-none">{MOOD_LABELS[moodColor]}</span>}
+                      {moodMarks.length > 0 && (
+                        <span className="mt-0.5 flex max-w-full gap-0.5 overflow-hidden text-[10px] leading-none">
+                          {moodMarks.map(entry => <span key={entry.id ?? `${entry.date}-${entry.createdBy}`}>{MOOD_LABELS[entry.mood]}</span>)}
+                        </span>
+                      )}
                     </div>
-                    {hasEntry(day) && moodColor && (
-                      <span className="absolute bottom-1 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full" style={{ backgroundColor: MOOD_COLORS[moodColor] }} />
+                    {dayEntries.length > 0 && (
+                      <span className="absolute bottom-1 left-1/2 flex -translate-x-1/2 gap-0.5">
+                        {moodMarks.map(entry => (
+                          <span key={entry.id ?? `${entry.date}-${entry.createdBy}-dot`} className="h-1 w-1 rounded-full" style={{ backgroundColor: MOOD_COLORS[entry.mood] }} />
+                        ))}
+                      </span>
                     )}
                   </motion.button>
                 );
@@ -266,7 +381,7 @@ export default function Diary() {
               <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold text-slate-400">最近记录</h3>
               <div className="space-y-1.5 max-h-80 overflow-y-auto">
                 {recentEntries.map(e => {
-                  const isActive = e.date === dateStr;
+                  const isActive = e.id === currentEntry?.id;
                   return (
                     <button
                       key={e.id}
@@ -280,7 +395,11 @@ export default function Diary() {
                         <p className={`truncate text-xs ${isActive ? 'text-sky-200' : 'text-slate-300'}`}>
                           {e.content.slice(0, 60).replace(/\n/g, ' ') || '空日志'}
                         </p>
-                        <p className="mt-0.5 text-[10px] text-slate-600">{e.date}</p>
+                        <p className="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-600">
+                          <span className={`h-1.5 w-1.5 rounded-full ${getAuthorColor(e.createdBy)}`} />
+                          <span>{getAuthorLabel(e)}</span>
+                          <span>{e.date}</span>
+                        </p>
                       </div>
                       {e.tags.length > 0 && (
                         <span className="shrink-0 rounded bg-white/[0.03] px-1.5 py-0.5 text-[9px] text-slate-500">#{e.tags[0]}</span>
@@ -299,6 +418,24 @@ export default function Diary() {
               <h3 className="text-lg font-bold text-white">
                 {new Date(dateStr).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}
               </h3>
+              {entriesForDate.length > 1 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {entriesForDate.map(entry => (
+                    <button
+                      key={entry.id}
+                      onClick={() => setSelectedEntryId(entry.id ?? null)}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] ${
+                        currentEntry?.id === entry.id
+                          ? 'border-sky-400/30 bg-sky-500/10 text-sky-200'
+                          : 'border-white/[0.06] bg-white/[0.03] text-slate-400 hover:bg-white/[0.05]'
+                      }`}
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${getAuthorColor(entry.createdBy)}`} />
+                      {getAuthorLabel(entry)}
+                    </button>
+                  ))}
+                </div>
+              )}
               {isToday && <span className="text-[10px] font-medium text-sky-400">今天</span>}
             </div>
             <div className="flex items-center gap-2">
@@ -397,6 +534,10 @@ export default function Diary() {
                 <div className="space-y-4">
                   <div className="flex items-center gap-3">
                     <span className="text-3xl">{MOOD_LABELS[currentEntry.mood]}</span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.03] px-2.5 py-1 text-[11px] text-slate-300">
+                      <span className={`h-1.5 w-1.5 rounded-full ${getAuthorColor(currentEntry.createdBy)}`} />
+                      {getAuthorLabel(currentEntry)}
+                    </span>
                     <div className="flex flex-wrap gap-1.5">
                       {currentEntry.tags.map(t => (
                         <span key={t} className="rounded-full border border-white/[0.06] bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-slate-400">#{t}</span>

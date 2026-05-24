@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { CheckCircle2, Cloud, Copy, Crown, Link2, Mail, RefreshCw, Rocket, Shield, Users } from 'lucide-react';
+import { CheckCircle2, Copy, Crown, Link2, Mail, RefreshCw, Rocket, Shield, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../stores/useAppStore';
 import { useCloudStore } from '../stores/useCloudStore';
@@ -66,9 +66,6 @@ export default function Collaboration() {
     inviteUrl,
     loading,
     error,
-    signIn,
-    signUp,
-    signOut,
     syncNow,
     loadTeam,
     inviteByEmail,
@@ -81,9 +78,6 @@ export default function Collaboration() {
     getRole,
     canOwn,
   } = useCloudStore();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [role, setRole] = useState<TeamRole>('editor');
   const [removeConfirm, setRemoveConfirm] = useState<number | null>(null);
@@ -91,19 +85,32 @@ export default function Collaboration() {
   const [permissionPage, setPermissionPage] = useState(1);
   const [eventPage, setEventPage] = useState(1);
   const [publishMessage, setPublishMessage] = useState('');
-  const [joinInviteInput, setJoinInviteInput] = useState('');
+  const [joinInviteInput, setJoinInviteInput] = useState(() => {
+    const token = localStorage.getItem('devtrack-pending-invite-token');
+    return token ? `${window.location.origin}/invite/${token}` : '';
+  });
   const [joinInviteMessage, setJoinInviteMessage] = useState('');
+  const [backupDirectory, setBackupDirectory] = useState('');
 
   useEffect(() => {
     if (currentProjectId) loadTeam(currentProjectId);
   }, [currentProjectId, loadTeam, syncState.lastSyncedAt]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getBackupDirectoryLabel().then(label => {
+      if (!cancelled) setBackupDirectory(label);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const currentRole = useMemo(() => getRole(currentProjectId), [currentProjectId, getRole, members]);
   const isOwner = canOwn(currentProjectId);
   const isShared = Boolean(project?.remoteProjectId);
   const inviteBase = getCustomBaseUrl() || window.location.origin;
   const isLanReady = /\/\/(26\.|192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(inviteBase);
-  const backupDirectory = getBackupDirectoryLabel();
   const activeMembers = paginate(members, activeMemberPage);
   const permissionMembers = paginate(members, permissionPage);
   const pagedEvents = paginate(events, eventPage);
@@ -143,10 +150,15 @@ export default function Collaboration() {
       setJoinInviteMessage('请先在左侧登录或注册 Supabase 账号，再用邀请链接加入项目。');
       return;
     }
-    await joinProject(parsed.remoteProjectId, parsed.role);
-    await syncNow();
-    setJoinInviteInput('');
-    setJoinInviteMessage('已根据邀请链接加入项目，正在同步项目数据。');
+    try {
+      await joinProject(parsed.remoteProjectId, parsed.role);
+      await syncNow();
+      setJoinInviteInput('');
+      localStorage.removeItem('devtrack-pending-invite-token');
+      setJoinInviteMessage('已根据邀请链接加入项目，正在同步项目数据。');
+    } catch (error) {
+      setJoinInviteMessage(error instanceof Error ? error.message : '加入项目失败，请稍后重试。');
+    }
   };
 
   useEffect(() => {
@@ -199,6 +211,8 @@ export default function Collaboration() {
 
       {error && <div className="glass rounded-2xl border border-amber-500/20 p-3 text-sm text-amber-200">{error}</div>}
 
+      {/* Only owners can publish projects and create invite links; editors/viewers keep join and activity views. */}
+      {isOwner && (
       <div className="glass rounded-[30px] p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -271,6 +285,7 @@ export default function Collaboration() {
           </p>
         )}
       </div>
+      )}
 
       {session && (
         <div className="glass rounded-[28px] p-5">
@@ -317,49 +332,7 @@ export default function Collaboration() {
         </div>
       )}
 
-      <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
-        <div className="glass rounded-[30px] p-5">
-          <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-200">
-            <Cloud size={16} className="text-cyan-300" />
-            账户与同步状态
-          </h3>
-
-          {session ? (
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
-                <p className="text-sm font-semibold text-white">{user?.displayName}</p>
-                <p className="mt-1 text-xs text-slate-500">{user?.email}</p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4">
-                  <p className="text-xs text-slate-500">同步状态</p>
-                  <p className="mt-2 text-sm font-semibold text-cyan-200">{syncLabels[syncState.syncStatus]}</p>
-                </div>
-                <div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4">
-                  <p className="text-xs text-slate-500">待同步</p>
-                  <p className="mt-2 text-sm font-semibold text-white">{syncState.pendingChanges}</p>
-                </div>
-                <div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4">
-                  <p className="text-xs text-slate-500">最近同步</p>
-                  <p className="mt-2 text-xs text-slate-300">{syncState.lastSyncedAt ? new Date(syncState.lastSyncedAt).toLocaleString('zh-CN') : '尚未同步'}</p>
-                </div>
-              </div>
-              <button onClick={signOut} className="rounded-xl border border-white/[0.06] px-4 py-2 text-sm text-slate-300 hover:bg-white/[0.04]">退出登录</button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <input value={displayName} onChange={event => setDisplayName(event.target.value)} placeholder="显示名称（注册时使用）" className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none" />
-              <input value={email} onChange={event => setEmail(event.target.value)} placeholder="邮箱，例如 QQ 邮箱也可以" className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none" />
-              <input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="密码" className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none" />
-              <div className="flex gap-3">
-                <button disabled={loading} onClick={() => signIn(email, password).catch(() => undefined)} className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-600 disabled:opacity-50">登录</button>
-                <button disabled={loading} onClick={() => signUp(email, password, displayName, `${window.location.origin}/collaboration`).catch(() => undefined)} className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50">注册</button>
-              </div>
-              <p className="text-xs leading-relaxed text-slate-500">需要配置 Supabase 环境变量并执行 docs/supabase-sync.sql。邮箱只是账户标识，不需要和 QQ 邮箱做额外联动。</p>
-            </div>
-          )}
-        </div>
-
+      <div className="space-y-5">
         <div className="glass rounded-[30px] p-5">
           <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-200">
             <Users size={16} className="text-emerald-300" />
@@ -398,7 +371,7 @@ export default function Collaboration() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {currentRole && <span className="rounded-full border border-white/[0.06] px-3 py-1 text-xs text-slate-300">我的权限：{roleLabels[currentRole]}</span>}
-                    {!isShared && session && (
+                    {!isShared && session && isOwner && (
                       <button
                         onClick={() => currentProjectId && publishProject(currentProjectId)}
                         disabled={loading}
@@ -415,18 +388,20 @@ export default function Collaboration() {
               {!isShared && <p className="rounded-2xl border border-amber-500/15 bg-amber-500/10 p-3 text-sm text-amber-100">先发布为共享项目，成员才能通过邮箱或邀请链接加入并同步任务、里程碑和日记。</p>}
               {isShared && !isOwner && <p className="rounded-2xl border border-sky-500/15 bg-sky-500/10 p-3 text-sm text-sky-100">当前项目由所有者管理邀请和权限。你的操作范围取决于上方显示的成员角色。</p>}
 
+              {isOwner && (
               <div className="grid gap-3 md:grid-cols-[1fr_140px_auto]">
                 <input disabled={!isOwner} value={inviteEmail} onChange={event => setInviteEmail(event.target.value)} placeholder="通过邮箱邀请成员" className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50" />
                 <select disabled={!isOwner} value={role} onChange={event => setRole(event.target.value as TeamRole)} className="rounded-xl border border-white/[0.06] bg-[#0d1726]/90 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50">
                   <option value="editor">编辑者</option>
                   <option value="viewer">查看者</option>
-                  <option value="owner">所有者</option>
                 </select>
                 <button disabled={!isOwner} onClick={handleInvite} className="flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50">
                   <Mail size={14} />
                   邀请
                 </button>
               </div>
+              )}
+              {isOwner && (
               <div className="flex flex-wrap gap-3">
                 <button disabled={!isShared || !isOwner} onClick={() => currentProjectId && createInviteLink(currentProjectId, role)} className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-2 text-sm text-slate-200 hover:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-50">
                   <Link2 size={14} />
@@ -439,6 +414,7 @@ export default function Collaboration() {
                   </button>
                 )}
               </div>
+              )}
               {inviteUrl && <p className="break-all rounded-2xl border border-white/[0.05] bg-white/[0.02] p-3 text-xs text-slate-400">{inviteUrl}</p>}
             </div>
           )}

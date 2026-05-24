@@ -1,4 +1,5 @@
-import { db, withoutSyncTracking } from '../db/database';
+import { db, getUserSetting, setUserSetting, withoutSyncTracking } from '../db/database';
+import { useCloudStore } from '../stores/useCloudStore';
 import type { Project } from '../types';
 
 export interface DevTrackBackup {
@@ -20,6 +21,7 @@ export interface DevTrackBackup {
     inviteLinks: unknown[];
     sprints: unknown[];
     comments: unknown[];
+    userSettings?: unknown[];
     localStorage: Record<string, string>;
   };
 }
@@ -69,11 +71,19 @@ function openBackupHandleDb(): Promise<IDBDatabase> {
   });
 }
 
+function getBackupUserId() {
+  return useCloudStore.getState().user?.id ?? null;
+}
+
+function getBackupHandleKey() {
+  return `${BACKUP_DIRECTORY_HANDLE_KEY}:${getBackupUserId() || 'local'}`;
+}
+
 async function getStoredBackupDirectoryHandle(): Promise<DirectoryHandleLike | null> {
   const database = await openBackupHandleDb();
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(BACKUP_HANDLE_STORE, 'readonly');
-    const request = transaction.objectStore(BACKUP_HANDLE_STORE).get(BACKUP_DIRECTORY_HANDLE_KEY);
+    const request = transaction.objectStore(BACKUP_HANDLE_STORE).get(getBackupHandleKey());
     request.onsuccess = () => resolve((request.result as DirectoryHandleLike | undefined) ?? null);
     request.onerror = () => reject(request.error);
     transaction.oncomplete = () => database.close();
@@ -84,7 +94,7 @@ async function saveBackupDirectoryHandle(handle: DirectoryHandleLike) {
   const database = await openBackupHandleDb();
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(BACKUP_HANDLE_STORE, 'readwrite');
-    transaction.objectStore(BACKUP_HANDLE_STORE).put(handle, BACKUP_DIRECTORY_HANDLE_KEY);
+    transaction.objectStore(BACKUP_HANDLE_STORE).put(handle, getBackupHandleKey());
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
@@ -98,16 +108,26 @@ async function ensureDirectoryPermission(handle: DirectoryHandleLike) {
   return await handle.requestPermission(descriptor) === 'granted';
 }
 
-export function getBackupDirectory() {
-  return localStorage.getItem(BACKUP_DIRECTORY_KEY) || '';
+export async function getBackupDirectory() {
+  const userId = getBackupUserId();
+  if (!userId) return localStorage.getItem(BACKUP_DIRECTORY_KEY) || '';
+  return getUserSetting(userId, BACKUP_DIRECTORY_KEY);
 }
 
-export function getBackupDirectoryLabel() {
-  return localStorage.getItem(BACKUP_DIRECTORY_LABEL_KEY) || getBackupDirectory();
+export async function getBackupDirectoryLabel() {
+  const userId = getBackupUserId();
+  if (!userId) return localStorage.getItem(BACKUP_DIRECTORY_LABEL_KEY) || localStorage.getItem(BACKUP_DIRECTORY_KEY) || '';
+  return (await getUserSetting(userId, BACKUP_DIRECTORY_LABEL_KEY)) || await getBackupDirectory();
 }
 
-export function setBackupDirectory(directory: string) {
+export async function setBackupDirectory(directory: string) {
   const value = directory.trim();
+  const userId = getBackupUserId();
+  if (userId) {
+    await setUserSetting(userId, BACKUP_DIRECTORY_KEY, value);
+    await setUserSetting(userId, BACKUP_DIRECTORY_LABEL_KEY, value);
+    return;
+  }
   if (value) {
     localStorage.setItem(BACKUP_DIRECTORY_KEY, value);
     localStorage.setItem(BACKUP_DIRECTORY_LABEL_KEY, value);
@@ -130,7 +150,12 @@ export async function selectBackupDirectory() {
   const handle = await picker();
   await saveBackupDirectoryHandle(handle);
   const label = handle.name ? `已选择文件夹：${handle.name}` : '已选择浏览器授权文件夹';
-  localStorage.setItem(BACKUP_DIRECTORY_LABEL_KEY, label);
+  const userId = getBackupUserId();
+  if (userId) {
+    await setUserSetting(userId, BACKUP_DIRECTORY_LABEL_KEY, label);
+  } else {
+    localStorage.setItem(BACKUP_DIRECTORY_LABEL_KEY, label);
+  }
   return label;
 }
 
@@ -152,7 +177,7 @@ export async function writeBackupToConfiguredDirectory(backup: DevTrackBackup) {
   const pickedPath = await writeBackupToPickedDirectory(backup);
   if (pickedPath) return pickedPath;
 
-  const directory = getBackupDirectory();
+  const directory = await getBackupDirectory();
   if (!directory) {
     throw new Error('请先在设置里填写备份文件存放目录');
   }
@@ -200,6 +225,7 @@ export async function createBackup(): Promise<DevTrackBackup> {
       inviteLinks: await db.inviteLinks.toArray(),
       sprints: await db.sprints.toArray(),
       comments: await db.comments.toArray(),
+      userSettings: await db.userSettings.toArray(),
       localStorage: localStorageData,
     },
   };
@@ -295,6 +321,7 @@ export async function restoreBackup(backup: DevTrackBackup) {
       db.inviteLinks,
       db.sprints,
       db.comments,
+      db.userSettings,
     ], async () => {
       await Promise.all([
         db.projects.clear(),
@@ -311,6 +338,7 @@ export async function restoreBackup(backup: DevTrackBackup) {
         db.inviteLinks.clear(),
         db.sprints.clear(),
         db.comments.clear(),
+        db.userSettings.clear(),
       ]);
 
       await Promise.all([
@@ -328,6 +356,7 @@ export async function restoreBackup(backup: DevTrackBackup) {
         db.inviteLinks.bulkPut(normalizedBackup.data.inviteLinks as never[]),
         db.sprints.bulkPut(normalizedBackup.data.sprints as never[]),
         db.comments.bulkPut(normalizedBackup.data.comments as never[]),
+        db.userSettings.bulkPut((normalizedBackup.data.userSettings || []) as never[]),
       ]);
     });
   });

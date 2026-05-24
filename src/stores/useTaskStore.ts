@@ -23,6 +23,27 @@ function nextDueDate(recurrence: RecurrenceRule, currentDueDate: string | null):
   return base.toISOString().slice(0, 16);
 }
 
+function getTaskStatusLabel(status: TaskStatus) {
+  if (status === 'todo') return '待办';
+  if (status === 'in_progress') return '进行中';
+  if (status === 'review') return '待审查';
+  if (status === 'done') return '已完成';
+  return status;
+}
+
+function taskListSignature(tasks: Task[]) {
+  return [...tasks].sort((a, b) => (a.id ?? 0) - (b.id ?? 0)).map(task => [
+    task.id,
+    task.remoteId,
+    task.updatedAt,
+    task.status,
+    task.sprintId ?? '',
+    task.sprintRemoteId ?? '',
+    task.milestoneId ?? '',
+    task.milestoneRemoteId ?? '',
+  ].join(':')).join('|');
+}
+
 async function generateNextRecurringTask(task: Task) {
   if (!task.recurrence || task.recurrence === 'none') return;
   const nextDue = nextDueDate(task.recurrence, task.dueDate);
@@ -72,7 +93,10 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   load: async (projectId) => {
     set({ loading: true });
     const tasks = await db.getTasksByProject(projectId);
-    set({ tasks, loading: false });
+    // Realtime refreshes can reload the same rows often; avoid needless task-board churn.
+    set(state => taskListSignature(state.tasks) === taskListSignature(tasks)
+      ? { loading: false }
+      : { tasks, loading: false });
   },
 
   add: async (task) => {
@@ -137,6 +161,20 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
     if (changes.status && changes.status !== prevTask.status) {
       recordTaskStatusChanged({ ...task, ...changes }, prevTask.status, changes.status).catch(() => {});
+      if (changes.status !== 'done') {
+        const user = useCloudStore.getState().user;
+        recordCollaborationEvent({
+          projectId: task.projectId,
+          remoteProjectId: useAppStore.getState().projects.find(project => project.id === task.projectId)?.remoteProjectId ?? null,
+          userId: user?.id ?? null,
+          userName: user?.displayName ?? '本地用户',
+          type: 'task_status_changed',
+          targetType: 'tasks',
+          targetId: id,
+          title: `调整了任务状态「${task.title}」`,
+          description: `${user?.displayName ?? '本地用户'} 将任务「${task.title}」从 ${getTaskStatusLabel(prevTask.status)} 调整为 ${getTaskStatusLabel(changes.status)}。`,
+        }).catch(() => {});
+      }
       if (changes.status === 'done') {
         const user = useCloudStore.getState().user;
         recordCollaborationEvent({
@@ -175,6 +213,18 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }
     await db.deleteTask(id);
     if (task) {
+      const user = useCloudStore.getState().user;
+      recordCollaborationEvent({
+        projectId: task.projectId,
+        remoteProjectId: useAppStore.getState().projects.find(project => project.id === task.projectId)?.remoteProjectId ?? null,
+        userId: user?.id ?? null,
+        userName: user?.displayName ?? '本地用户',
+        type: 'task_deleted',
+        targetType: 'tasks',
+        targetId: id,
+        title: `删除了任务「${task.title}」`,
+        description: `${user?.displayName ?? '本地用户'} 删除了任务「${task.title}」。`,
+      }).catch(() => {});
       await refreshMilestonesForTaskChange(task.projectId, task.milestoneId, null);
       await useMilestoneStore.getState().load(task.projectId);
       await get().load(task.projectId);
@@ -204,6 +254,20 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       return;
     }
     recordTaskStatusChanged({ ...task, status }, task.status, status).catch(() => {});
+    if (status !== 'done') {
+      const user = useCloudStore.getState().user;
+      recordCollaborationEvent({
+        projectId: task.projectId,
+        remoteProjectId: useAppStore.getState().projects.find(project => project.id === task.projectId)?.remoteProjectId ?? null,
+        userId: user?.id ?? null,
+        userName: user?.displayName ?? '本地用户',
+        type: 'task_status_changed',
+        targetType: 'tasks',
+        targetId: id,
+        title: `调整了任务状态「${task.title}」`,
+        description: `${user?.displayName ?? '本地用户'} 将任务「${task.title}」从 ${getTaskStatusLabel(task.status)} 调整为 ${getTaskStatusLabel(status)}。`,
+      }).catch(() => {});
+    }
     if (status === 'done') {
       const user = useCloudStore.getState().user;
       recordCollaborationEvent({

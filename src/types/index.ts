@@ -15,8 +15,13 @@ export type CollaborationEventType =
   | 'member_invited'
   | 'member_role_changed'
   | 'task_created'
+  | 'task_updated'
+  | 'task_deleted'
+  | 'task_status_changed'
   | 'task_completed'
   | 'milestone_created'
+  | 'milestone_completed'
+  | 'sprint_updated'
   | 'diary_created'
   | 'comment_added';
 export type PomodoroPhase = 'work' | 'short_break' | 'long_break';
@@ -67,6 +72,8 @@ export interface Task {
   trackedMinutes?: number;
   pomodoroGoal?: number | null;
   sprintId?: number | null;
+  sprintRemoteId?: string | null;
+  milestoneRemoteId?: string | null;
   createdBy?: string | null;
   updatedBy?: string | null;
   remoteId?: string | null;
@@ -128,6 +135,7 @@ export interface DiaryEntry {
   content: string;
   mood: MoodType;
   tags: string[];
+  createdBy?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -152,7 +160,18 @@ export interface Sprint {
   status: 'planning' | 'active' | 'completed';
   startDate: string;
   endDate: string;
+  createdBy?: string | null;
+  remoteId?: string | null;
+  syncUpdatedAt?: string | null;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserSetting {
+  id?: number;
+  userId: string;
+  key: string;
+  value: string;
   updatedAt: string;
 }
 
@@ -350,7 +369,6 @@ export const ACHIEVEMENTS: Omit<Achievement, 'id' | 'unlockedAt'>[] = [
   { key: 'five_milestones', title: '里程碑收割机', description: '完成 5 个里程碑', icon: '🏆', level: 'silver' },
   { key: 'all_tags', title: '标签大师', description: '使用过 10 种不同的标签', icon: '🏷️', level: 'silver' },
   { key: 'est_accurate', title: '预估精准', description: '10 个任务实际工时在预估的 ±20% 内', icon: '🎯', level: 'silver' },
-  { key: 'sprint_master', title: '冲刺达人', description: '完成第一个 Sprint', icon: '⚡', level: 'silver' },
   // Gold tier
   { key: 'streak_60', title: '连击王者', description: '连续 60 天打卡日记', icon: '👑', level: 'gold' },
   { key: 'hundred_tasks', title: '百战老将', description: '累计完成 100 个任务', icon: '💎', level: 'gold' },

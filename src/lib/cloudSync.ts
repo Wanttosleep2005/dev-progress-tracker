@@ -1,5 +1,6 @@
 import { db, withoutSyncTracking } from '../db/database';
 import type { CollaborationEvent, Project, SyncChange, SyncEntityType, SyncState, TeamMember, User } from '../types';
+import { createClientId } from './id';
 
 const AUTH_STORAGE_KEY = 'devtrack-cloud-session';
 const DELETED_REMOTE_PROJECTS_KEY = 'devtrack-deleted-remote-projects';
@@ -73,6 +74,12 @@ interface RemoteMemberRow {
   last_seen_at?: string | null;
 }
 
+interface RemoteJoinProjectResult {
+  project_id: string;
+  role: TeamMember['role'];
+  already_member: boolean;
+}
+
 const tableMap = {
   projects: db.projects,
   tasks: db.tasks,
@@ -83,6 +90,7 @@ const tableMap = {
   comments: db.comments,
 };
 
+const DEPRECATED_SYNC_ENTITY_TYPES = new Set<SyncEntityType>(['sprints']);
 const MEMBER_ONLINE_WINDOW_MS = 2 * 60 * 1000;
 
 export function isMemberOnline(lastSeenAt?: string | null, now = Date.now()) {
@@ -118,11 +126,11 @@ function assertConfigured(): { url: string; anonKey: string; deleteAccountFuncti
   };
 }
 
-function getClientId() {
+export function getClientId() {
   const key = 'devtrack-client-id';
   const existing = localStorage.getItem(key);
   if (existing) return existing;
-  const next = crypto.randomUUID();
+  const next = createClientId();
   localStorage.setItem(key, next);
   return next;
 }
@@ -264,8 +272,132 @@ function rowToMember(row: RemoteMemberRow, projectId: number): Omit<TeamMember, 
   };
 }
 
-function getRemoteRecordId(remoteProjectId: string, entityType: SyncEntityType, entityId: number) {
-  return `${remoteProjectId}:${entityType}:${entityId}`;
+function getRemoteRecordId(remoteProjectId: string, entityType: SyncEntityType, remoteEntityId: number | string) {
+  const key = String(remoteEntityId);
+  return key.startsWith(`${remoteProjectId}:${entityType}:`) ? key : `${remoteProjectId}:${entityType}:${key}`;
+}
+
+async function mergeDuplicateSharedProjects(remoteProjectId: string, preferredId?: number | null) {
+  const projects = await db.projects.where('remoteProjectId').equals(remoteProjectId).toArray();
+  if (projects.length <= 1) return preferredId ?? projects[0]?.id ?? null;
+
+  const keep = projects.find(project => project.id === preferredId) ?? projects[0];
+  if (!keep.id) return null;
+  const duplicates = projects.filter(project => project.id && project.id !== keep.id);
+
+  for (const duplicate of duplicates) {
+    if (!duplicate.id) continue;
+    await db.tasks.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
+    await db.milestones.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
+    await db.timelineEvents.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
+    await db.diaryEntries.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
+    await db.teamMembers.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
+    await db.syncChanges.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
+    await db.collaborationEvents.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
+    await db.notifications.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
+    await db.inviteLinks.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
+    await db.sprints.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
+    await db.projects.delete(duplicate.id);
+  }
+
+  return keep.id;
+}
+
+async function ensureSnapshotRemoteId(
+  remoteProjectId: string,
+  entityType: SyncEntityType,
+  entityId: number,
+  payload: Record<string, unknown>
+) {
+  if (entityType === 'projects') {
+    return {
+      recordId: getRemoteRecordId(remoteProjectId, entityType, remoteProjectId),
+      payload,
+    };
+  }
+
+  const existingRemoteId = typeof payload.remoteId === 'string' && payload.remoteId
+    ? payload.remoteId
+    : null;
+  const recordId = existingRemoteId
+    ? getRemoteRecordId(remoteProjectId, entityType, existingRemoteId)
+    : getRemoteRecordId(remoteProjectId, entityType, createClientId());
+  const nextPayload = { ...payload, remoteId: recordId };
+
+  if (!existingRemoteId) {
+    const table = tableMap[entityType];
+    if (table) {
+      await withoutSyncTracking(async () => {
+        await table.update(entityId, { remoteId: recordId } as never);
+      });
+    }
+  }
+
+  return { recordId, payload: nextPayload };
+}
+
+async function ensureRelatedRemoteId(remoteProjectId: string, entityType: SyncEntityType, entityId: unknown) {
+  if (typeof entityId !== 'number') return null;
+  const table = tableMap[entityType];
+  if (!table) return null;
+  const row = await table.get(entityId) as { remoteId?: string | null } | undefined;
+  if (row?.remoteId) return row.remoteId;
+  const remoteId = getRemoteRecordId(remoteProjectId, entityType, createClientId());
+  await withoutSyncTracking(async () => {
+    await table.update(entityId, { remoteId } as never);
+  });
+  return remoteId;
+}
+
+async function serializeRemotePayload(remoteProjectId: string, entityType: SyncEntityType, payload: Record<string, unknown>) {
+  if (entityType !== 'tasks') return payload;
+  // Sprint planning has been removed from the product surface, so old sprint links are not synced forward.
+  return {
+    ...payload,
+    sprintId: null,
+    sprintRemoteId: null,
+    milestoneRemoteId: await ensureRelatedRemoteId(remoteProjectId, 'milestones', payload.milestoneId),
+  };
+}
+
+async function resolveLocalReferenceId(
+  remoteProjectId: string | null,
+  localProjectId: number | null | undefined,
+  entityType: SyncEntityType,
+  remoteId: unknown,
+  legacyId: unknown
+) {
+  const table = tableMap[entityType];
+  if (!table || !localProjectId) return null;
+  const candidates = [
+    typeof remoteId === 'string' ? remoteId : null,
+    typeof legacyId === 'number' && remoteProjectId ? getRemoteRecordId(remoteProjectId, entityType, legacyId) : null,
+  ].filter((value): value is string => Boolean(value));
+  for (const candidate of candidates) {
+    const row = await table
+      .filter(item => {
+        const value = item as { remoteId?: string | null; projectId?: number };
+        return value.projectId === localProjectId && value.remoteId === candidate;
+      })
+      .first() as { id?: number } | undefined;
+    if (typeof row?.id === 'number') return row.id;
+  }
+  if (typeof legacyId === 'number') {
+    const row = await table.get(legacyId) as { id?: number; projectId?: number } | undefined;
+    if (row?.projectId === localProjectId) return legacyId;
+  }
+  return null;
+}
+
+async function deserializeRemotePayload(record: RemoteRecord, localProjectId: number | null | undefined, payload: Record<string, unknown>) {
+  if (record.entity_type !== 'tasks') return payload;
+  // Keep deprecated sprint links out of local task state while preserving milestone portability.
+  return {
+    ...payload,
+    sprintId: null,
+    sprintRemoteId: null,
+    milestoneId: await resolveLocalReferenceId(record.remote_project_id, localProjectId, 'milestones', payload.milestoneRemoteId, payload.milestoneId),
+  };
 }
 
 async function resolveChangeRemoteProjectId(change: SyncChange): Promise<string | null> {
@@ -278,11 +410,39 @@ async function resolveChangeRemoteProjectId(change: SyncChange): Promise<string 
   return project?.remoteProjectId ?? null;
 }
 
+async function getCurrentRemoteRole(session: CloudSession, remoteProjectId: string): Promise<TeamMember['role'] | null> {
+  const authUserId = getSessionAuthUserId(session);
+  const email = session.user.email.toLowerCase();
+  const localProject = await db.projects.where('remoteProjectId').equals(remoteProjectId).first();
+  if (localProject?.id) {
+    const localMember = await db.teamMembers
+      .where('projectId')
+      .equals(localProject.id)
+      .filter(member => member.userId === authUserId || member.email?.toLowerCase() === email || member.userId === `email:${email}`)
+      .first();
+    if (localMember?.role) return localMember.role;
+  }
+
+  const remoteMember = await fetchCurrentRemoteMembers(session, remoteProjectId).catch(() => []);
+  return remoteMember.find(member => member.user_id === authUserId || member.email?.toLowerCase() === email)?.role ?? null;
+}
+
+async function canPushChange(session: CloudSession, remoteProjectId: string, change: SyncChange) {
+  const role = await getCurrentRemoteRole(session, remoteProjectId);
+  if (role === 'owner') return { allowed: true, role };
+  if (role === 'editor') return { allowed: change.entityType !== 'projects', role };
+  return { allowed: false, role };
+}
+
 async function getSyncablePendingChanges(): Promise<SyncChange[]> {
   const changes = await db.syncChanges.toArray();
   const syncable: SyncChange[] = [];
 
   for (const change of changes) {
+    if (DEPRECATED_SYNC_ENTITY_TYPES.has(change.entityType)) {
+      if (change.id) await db.syncChanges.delete(change.id);
+      continue;
+    }
     const remoteProjectId = await resolveChangeRemoteProjectId(change);
     if (remoteProjectId || change.conflict) {
       syncable.push(remoteProjectId && !change.remoteProjectId ? { ...change, remoteProjectId } : change);
@@ -463,6 +623,7 @@ export async function importSharedProjects(session: CloudSession): Promise<numbe
     });
 
     if (!localId) continue;
+    localId = await mergeDuplicateSharedProjects(remoteProject.id, localId) ?? localId;
     localProjectIds.push(localId);
     const projectMembers = members.filter(member => member.project_id === remoteProject.id);
     await db.teamMembers.where('projectId').equals(localId).delete();
@@ -517,14 +678,16 @@ async function pushEntitySnapshot(
 ) {
   const config = assertConfigured();
   const authUserId = getSessionAuthUserId(session);
+  const portablePayload = await serializeRemotePayload(remoteProjectId, entityType, payload);
+  const snapshot = await ensureSnapshotRemoteId(remoteProjectId, entityType, entityId, portablePayload);
   const record = {
-    id: getRemoteRecordId(remoteProjectId, entityType, entityId),
+    id: snapshot.recordId,
     user_id: authUserId,
     remote_project_id: remoteProjectId,
     entity_type: entityType,
     entity_id: entityId,
     project_id: projectId,
-    payload,
+    payload: snapshot.payload,
     updated_at: updatedAt,
     deleted_at: null,
     client_id: getClientId(),
@@ -553,6 +716,17 @@ async function pushChange(change: SyncChange, session: CloudSession): Promise<bo
     return true;
   }
 
+  const pushPermission = await canPushChange(session, remoteProjectId, change);
+  if (!pushPermission.allowed) {
+    if (change.entityType === 'projects') {
+      return true;
+    }
+    if (change.id && (pushPermission.role === 'viewer' || pushPermission.role == null)) {
+      await db.syncChanges.update(change.id, { conflict: true });
+    }
+    return false;
+  }
+
   await pushEntitySnapshot(
     session,
     remoteProjectId,
@@ -565,7 +739,10 @@ async function pushChange(change: SyncChange, session: CloudSession): Promise<bo
 
   if (change.operation === 'delete') {
     const config = assertConfigured();
-    await supabaseFetch(`/rest/v1/${config.syncTable}?id=eq.${encodeURIComponent(getRemoteRecordId(remoteProjectId, change.entityType, change.entityId))}`, {
+    const remoteRecordId = typeof change.payload.remoteId === 'string'
+      ? change.payload.remoteId
+      : getRemoteRecordId(remoteProjectId, change.entityType, change.entityId);
+    await supabaseFetch(`/rest/v1/${config.syncTable}?id=eq.${encodeURIComponent(remoteRecordId)}`, {
       method: 'PATCH',
       body: JSON.stringify({ deleted_at: change.localUpdatedAt, updated_at: change.localUpdatedAt, user_id: getSessionAuthUserId(session), client_id: getClientId() }),
     }, session.accessToken);
@@ -573,7 +750,7 @@ async function pushChange(change: SyncChange, session: CloudSession): Promise<bo
   return true;
 }
 
-async function recordRemoteActivity(record: RemoteRecord, payload: Record<string, unknown>) {
+async function recordRemoteActivityLegacy(record: RemoteRecord, payload: Record<string, unknown>) {
   if (record.client_id === getClientId() || record.deleted_at) return;
   const projectId = typeof payload.projectId === 'number' ? payload.projectId : record.project_id ?? 0;
   if (record.entity_type === 'comments') {
@@ -613,11 +790,183 @@ async function recordRemoteActivity(record: RemoteRecord, payload: Record<string
   });
 }
 
+function getTaskStatusLabel(status: unknown) {
+  if (status === 'todo') return '待办';
+  if (status === 'in_progress') return '进行中';
+  if (status === 'review') return '待审查';
+  if (status === 'done') return '已完成';
+  return typeof status === 'string' ? status : '未知状态';
+}
+
+async function hasRemoteActivity(projectId: number, type: CollaborationEvent['type'], targetId: number | string | null, updatedAt: string) {
+  return db.collaborationEvents
+    .where('projectId')
+    .equals(projectId)
+    .filter(event => event.type === type && event.targetId === targetId && event.createdAt >= updatedAt)
+    .first();
+}
+
+async function recordRemoteActivity(record: RemoteRecord, payload: Record<string, unknown>, previous?: Record<string, unknown> | null) {
+  if (record.client_id === getClientId() || record.deleted_at) return;
+  const projectId = typeof payload.projectId === 'number' ? payload.projectId : record.project_id ?? 0;
+
+  if (record.entity_type === 'comments') {
+    const exists = await hasRemoteActivity(projectId, 'comment_added', record.entity_id, record.updated_at);
+    if (exists) return;
+    await recordCollaborationEvent({
+      projectId,
+      remoteProjectId: record.remote_project_id,
+      userId: record.user_id,
+      userName: '远程成员',
+      type: 'comment_added',
+      targetType: 'comments',
+      targetId: record.entity_id,
+      title: '新增了任务评论',
+      description: '远程成员新增了一条任务评论。',
+    });
+    return;
+  }
+
+  if (record.entity_type === 'diaryEntries') {
+    const exists = await hasRemoteActivity(projectId, 'diary_created', record.entity_id, record.updated_at);
+    if (exists) return;
+    await recordCollaborationEvent({
+      projectId,
+      remoteProjectId: record.remote_project_id,
+      userId: record.user_id,
+      userName: '远程成员',
+      type: 'diary_created',
+      targetType: 'diaryEntries',
+      targetId: record.entity_id,
+      title: previous ? '更新了开发日志' : '创建了开发日志',
+      description: `远程成员${previous ? '更新' : '创建'}了 ${String(payload.date || '')} 的开发日志。`,
+    });
+    return;
+  }
+
+  if (record.entity_type === 'milestones' && previous?.status !== payload.status && payload.status === 'completed') {
+    const title = typeof payload.title === 'string' ? payload.title : `里程碑 ${record.entity_id}`;
+    const exists = await hasRemoteActivity(projectId, 'milestone_completed', record.entity_id, record.updated_at);
+    if (exists) return;
+    await recordCollaborationEvent({
+      projectId,
+      remoteProjectId: record.remote_project_id,
+      userId: record.user_id,
+      userName: '远程成员',
+      type: 'milestone_completed',
+      targetType: 'milestones',
+      targetId: record.entity_id,
+      title: `完成了里程碑「${title}」`,
+      description: `远程成员完成了里程碑「${title}」。`,
+    });
+    return;
+  }
+
+  if (record.entity_type === 'sprints') {
+    const title = typeof payload.name === 'string' ? payload.name : `Sprint ${record.entity_id}`;
+    const exists = await hasRemoteActivity(projectId, 'sprint_updated', record.entity_id, record.updated_at);
+    if (exists) return;
+    await recordCollaborationEvent({
+      projectId,
+      remoteProjectId: record.remote_project_id,
+      userId: record.user_id,
+      userName: '远程成员',
+      type: 'sprint_updated',
+      targetType: 'sprints',
+      targetId: record.entity_id,
+      title: previous ? `更新了冲刺「${title}」` : `创建了冲刺「${title}」`,
+      description: `远程成员${previous ? '更新' : '创建'}了冲刺「${title}」。`,
+    });
+    return;
+  }
+
+  if (record.entity_type !== 'tasks') return;
+
+  const status = payload.status;
+  const title = typeof payload.title === 'string' ? payload.title : `任务 ${record.entity_id}`;
+
+  if (!previous) {
+    const exists = await hasRemoteActivity(projectId, 'task_created', record.entity_id, record.updated_at);
+    if (exists) return;
+    await recordCollaborationEvent({
+      projectId,
+      remoteProjectId: record.remote_project_id,
+      userId: record.user_id,
+      userName: '远程成员',
+      type: 'task_created',
+      targetType: 'tasks',
+      targetId: record.entity_id,
+      title: `创建了任务「${title}」`,
+      description: `远程成员创建了任务「${title}」。`,
+    });
+    return;
+  }
+
+  if (previous.status !== status) {
+    const eventType: CollaborationEvent['type'] = status === 'done' ? 'task_completed' : 'task_status_changed';
+    const exists = await hasRemoteActivity(projectId, eventType, record.entity_id, record.updated_at);
+    if (exists) return;
+    await recordCollaborationEvent({
+      projectId,
+      remoteProjectId: record.remote_project_id,
+      userId: record.user_id,
+      userName: '远程成员',
+      type: eventType,
+      targetType: 'tasks',
+      targetId: record.entity_id,
+      title: status === 'done' ? `完成了任务「${title}」` : `调整了任务状态「${title}」`,
+      description: status === 'done'
+        ? `远程成员完成了任务「${title}」。`
+        : `远程成员将任务「${title}」从 ${getTaskStatusLabel(previous.status)} 调整为 ${getTaskStatusLabel(status)}。`,
+    });
+    return;
+  }
+
+  const exists = await hasRemoteActivity(projectId, 'task_updated', record.entity_id, record.updated_at);
+  if (exists) return;
+  await recordCollaborationEvent({
+    projectId,
+    remoteProjectId: record.remote_project_id,
+    userId: record.user_id,
+    userName: '远程成员',
+    type: 'task_updated',
+    targetType: 'tasks',
+    targetId: record.entity_id,
+    title: `更新了任务「${title}」`,
+    description: `远程成员更新了任务「${title}」。`,
+  });
+}
+
+async function recordRemoteDeletionActivity(record: RemoteRecord, existing: unknown, localProjectId: number | null | undefined) {
+  if (record.client_id === getClientId() || record.entity_type !== 'tasks') return;
+  const projectId = localProjectId ?? record.project_id ?? 0;
+  const previousTask = existing as Record<string, unknown> | undefined;
+  const title = typeof previousTask?.title === 'string' ? previousTask.title : `任务 ${record.entity_id}`;
+  const exists = await hasRemoteActivity(projectId, 'task_deleted', record.entity_id, record.updated_at);
+  if (exists) return;
+  await recordCollaborationEvent({
+    projectId,
+    remoteProjectId: record.remote_project_id,
+    userId: record.user_id,
+    userName: '远程成员',
+    type: 'task_deleted',
+    targetType: 'tasks',
+    targetId: record.entity_id,
+    title: `删除了任务「${title}」`,
+    description: `远程成员删除了任务「${title}」。`,
+  });
+}
+
 async function applyRemoteRecord(record: RemoteRecord, pending: SyncChange[]) {
+  if (DEPRECATED_SYNC_ENTITY_TYPES.has(record.entity_type)) return;
   const table = tableMap[record.entity_type];
   if (!table) return;
 
-  const localPending = pending.find(change => change.entityType === record.entity_type && change.entityId === record.entity_id);
+  const remoteIdentity = record.id;
+  const localPending = pending.find(change => (
+    change.entityType === record.entity_type &&
+    (change.entityId === record.entity_id || change.payload.remoteId === remoteIdentity)
+  ));
   if (localPending && record.client_id !== getClientId()) {
     await db.syncChanges.update(localPending.id!, { conflict: true });
     await recordCollaborationEvent({
@@ -635,23 +984,59 @@ async function applyRemoteRecord(record: RemoteRecord, pending: SyncChange[]) {
   }
 
   await withoutSyncTracking(async () => {
-    if (record.deleted_at) {
-      await table.delete(record.entity_id);
+    if (record.entity_type === 'projects') {
+      if (!record.remote_project_id) return;
+      const existingProject = record.remote_project_id
+        ? await db.projects.where('remoteProjectId').equals(record.remote_project_id).first()
+        : null;
+      if (record.deleted_at) {
+        if (existingProject?.id) await db.projects.delete(existingProject.id);
+        return;
+      }
+      const payload = {
+        ...record.payload,
+        id: existingProject?.id,
+        remoteProjectId: record.remote_project_id,
+        updatedAt: record.updated_at,
+      };
+      if (existingProject?.id) {
+        await db.projects.update(existingProject.id, payload);
+        await mergeDuplicateSharedProjects(record.remote_project_id, existingProject.id);
+      } else {
+        const addedId = await db.projects.add({ ...payload, id: undefined } as never);
+        await mergeDuplicateSharedProjects(record.remote_project_id, addedId);
+      }
       return;
     }
+
     const localProject = record.remote_project_id
       ? await db.projects.where('remoteProjectId').equals(record.remote_project_id).first()
       : null;
-    const payload = {
+    const existing = await table
+      .filter(item => {
+        const value = item as { remoteId?: string | null; projectId?: number };
+        return value.remoteId === remoteIdentity || value.remoteId === (record.payload as { remoteId?: string | null }).remoteId;
+      })
+      .first();
+
+    if (record.deleted_at) {
+      const targetId = (existing as { id?: number } | undefined)?.id;
+      if (typeof targetId === 'number') await table.delete(targetId);
+      await recordRemoteDeletionActivity(record, existing, localProject?.id);
+      return;
+    }
+
+    const previous = existing ? { ...(existing as unknown as Record<string, unknown>) } : null;
+    const payload = await deserializeRemotePayload(record, localProject?.id, {
       ...record.payload,
-      id: record.entity_id,
-      projectId: record.entity_type === 'projects' ? record.entity_id : localProject?.id ?? record.project_id,
-      remoteProjectId: record.entity_type === 'projects' ? record.remote_project_id : (record.payload as { remoteProjectId?: string | null }).remoteProjectId,
-      remoteId: record.id,
+      id: (existing as { id?: number } | undefined)?.id,
+      projectId: localProject?.id ?? record.project_id,
+      remoteProjectId: (record.payload as { remoteProjectId?: string | null }).remoteProjectId,
+      remoteId: remoteIdentity,
       syncUpdatedAt: record.updated_at,
-    };
+    });
     await table.put(payload as never);
-    await recordRemoteActivity(record, payload);
+    await recordRemoteActivity(record, payload, previous);
   });
 }
 
@@ -736,8 +1121,8 @@ export function buildInviteUrl(projectId: number, role: TeamMember['role']) {
 }
 
 export async function publishProjectToCloud(session: CloudSession, project: Project): Promise<string> {
-  const config = assertConfigured();
-  const remoteId = project.remoteProjectId || crypto.randomUUID();
+  assertConfigured();
+  const remoteId = project.remoteProjectId || createClientId();
   const now = new Date().toISOString();
   const authUserId = getSessionAuthUserId(session);
   if (!authUserId) {
@@ -763,12 +1148,11 @@ export async function publishProjectToCloud(session: CloudSession, project: Proj
     await pushEntitySnapshot(session, remoteId, 'projects', updatedProject.id, updatedProject.id, updatedProject as unknown as Record<string, unknown>, updatedProject.updatedAt);
   }
 
-  const [tasks, milestones, timelineEvents, diaryEntries, sprints] = await Promise.all([
+  const [tasks, milestones, timelineEvents, diaryEntries] = await Promise.all([
     db.tasks.where('projectId').equals(project.id!).toArray(),
     db.milestones.where('projectId').equals(project.id!).toArray(),
     db.timelineEvents.where('projectId').equals(project.id!).toArray(),
     db.diaryEntries.where('projectId').equals(project.id!).toArray(),
-    db.sprints.where('projectId').equals(project.id!).toArray(),
   ]);
   const taskIds = tasks.map(task => task.id).filter((id): id is number => typeof id === 'number');
   const comments = taskIds.length > 0 ? await db.comments.where('taskId').anyOf(taskIds).toArray() : [];
@@ -783,9 +1167,6 @@ export async function publishProjectToCloud(session: CloudSession, project: Proj
   }
   for (const entry of diaryEntries) {
     if (entry.id) await pushEntitySnapshot(session, remoteId, 'diaryEntries', entry.id, entry.projectId, entry as unknown as Record<string, unknown>, entry.updatedAt);
-  }
-  for (const sprint of sprints) {
-    if (sprint.id) await pushEntitySnapshot(session, remoteId, 'sprints', sprint.id, sprint.projectId, sprint as unknown as Record<string, unknown>, sprint.updatedAt);
   }
   for (const comment of comments) {
     if (comment.id) await pushEntitySnapshot(session, remoteId, 'comments', comment.id, project.id!, comment as unknown as Record<string, unknown>, comment.createdAt);
@@ -833,6 +1214,17 @@ export async function upsertRemoteMember(session: CloudSession, remoteProjectId:
       last_seen_at: member.lastSeenAt,
     }),
   }, session.accessToken);
+}
+
+async function fetchCurrentRemoteMembers(session: CloudSession, remoteProjectId: string): Promise<RemoteMemberRow[]> {
+  const config = assertConfigured();
+  const authUserId = encodeURIComponent(getSessionAuthUserId(session));
+  const email = encodeURIComponent(session.user.email);
+  return supabaseFetch(
+    `/rest/v1/${config.memberTable}?select=*&project_id=eq.${encodeURIComponent(remoteProjectId)}&or=(user_id.eq.${authUserId},email.eq.${email})`,
+    { method: 'GET' },
+    session.accessToken
+  ) as Promise<RemoteMemberRow[]>;
 }
 
 export async function touchMemberPresence(session: CloudSession, projectId?: number | null): Promise<number> {
@@ -929,13 +1321,46 @@ export function parseRemoteInvite(input: string): RemoteInvitePayload | null {
 
 export async function joinRemoteProject(session: CloudSession, remoteProjectId: string, role: TeamMember['role']) {
   const authUserId = getSessionAuthUserId(session);
-  await upsertRemoteMember(session, remoteProjectId, {
-    userId: authUserId,
-    role,
-    email: session.user.email,
-    displayName: session.user.displayName,
-    online: true,
-    lastSeenAt: new Date().toISOString(),
-  });
-  await importSharedProjects(session);
+  if (role === 'owner') {
+    throw new Error('邀请链接不能授予所有者权限。请由当前 Owner 在团队协作中执行“转让所有权”。');
+  }
+
+  const existingMembers = await fetchCurrentRemoteMembers(session, remoteProjectId).catch(() => []);
+  const existingMember = existingMembers.find(member => member.user_id === authUserId)
+    ?? existingMembers.find(member => member.email?.toLowerCase() === session.user.email.toLowerCase());
+
+  if (existingMember?.role === 'owner') {
+    await touchMemberPresence(session);
+    return importSharedProjects(session);
+  }
+
+  try {
+    await supabaseFetch('/rest/v1/rpc/devtrack_join_project', {
+      method: 'POST',
+      body: JSON.stringify({
+        p_project_id: remoteProjectId,
+        p_role: role,
+        p_email: session.user.email,
+        p_display_name: session.user.displayName,
+      }),
+    }, session.accessToken) as RemoteJoinProjectResult[];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (!message.includes('devtrack_join_project') && !message.includes('schema cache')) {
+      throw error;
+    }
+    if (existingMember) {
+      throw new Error('Supabase 数据库缺少 devtrack_join_project 迁移，无法把邮箱邀请绑定到真实账号。请先执行 supabase/sql/migrations/join-project-safety.sql。', { cause: error });
+    }
+    await upsertRemoteMember(session, remoteProjectId, {
+      userId: authUserId,
+      role,
+      email: session.user.email,
+      displayName: session.user.displayName,
+      online: true,
+      lastSeenAt: new Date().toISOString(),
+    });
+  }
+
+  return importSharedProjects(session);
 }
