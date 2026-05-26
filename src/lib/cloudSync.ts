@@ -1,4 +1,4 @@
-import { db, withoutSyncTracking } from '../db/database';
+import { db, normalizeArchRootNodes, withoutSyncTracking } from '../db/database';
 import type { CollaborationEvent, Project, SyncChange, SyncEntityType, SyncState, TeamMember, User } from '../types';
 import { createClientId } from './id';
 
@@ -42,18 +42,20 @@ interface SupabaseAuthResponse {
   };
 }
 
-interface RemoteRecord {
+export interface RemoteSyncLogRecord {
   id: string;
   user_id: string;
   remote_project_id: string | null;
   entity_type: SyncEntityType;
-  entity_id: number;
+  entity_id: number | string;
   project_id: number | null;
   payload: Record<string, unknown>;
   updated_at: string;
   deleted_at: string | null;
   client_id: string;
 }
+
+interface RemoteRecord extends RemoteSyncLogRecord {}
 
 interface RemoteProjectRow {
   id: string;
@@ -88,6 +90,7 @@ const tableMap = {
   diaryEntries: db.diaryEntries,
   sprints: db.sprints,
   comments: db.comments,
+  archNodes: db.archNodes,
 };
 
 const DEPRECATED_SYNC_ENTITY_TYPES = new Set<SyncEntityType>(['sprints']);
@@ -291,6 +294,7 @@ async function mergeDuplicateSharedProjects(remoteProjectId: string, preferredId
     await db.milestones.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
     await db.timelineEvents.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
     await db.diaryEntries.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
+    await db.archNodes.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
     await db.teamMembers.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
     await db.syncChanges.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
     await db.collaborationEvents.where('projectId').equals(duplicate.id).modify({ projectId: keep.id });
@@ -306,13 +310,21 @@ async function mergeDuplicateSharedProjects(remoteProjectId: string, preferredId
 async function ensureSnapshotRemoteId(
   remoteProjectId: string,
   entityType: SyncEntityType,
-  entityId: number,
+  entityId: number | string,
   payload: Record<string, unknown>
 ) {
   if (entityType === 'projects') {
     return {
       recordId: getRemoteRecordId(remoteProjectId, entityType, remoteProjectId),
       payload,
+    };
+  }
+
+  if (entityType === 'archNodes') {
+    const recordId = getRemoteRecordId(remoteProjectId, entityType, entityId);
+    return {
+      recordId,
+      payload: { ...payload, id: entityId, remoteId: recordId },
     };
   }
 
@@ -324,7 +336,7 @@ async function ensureSnapshotRemoteId(
     : getRemoteRecordId(remoteProjectId, entityType, createClientId());
   const nextPayload = { ...payload, remoteId: recordId };
 
-  if (!existingRemoteId) {
+  if (!existingRemoteId && typeof entityId === 'number') {
     const table = tableMap[entityType];
     if (table) {
       await withoutSyncTracking(async () => {
@@ -338,7 +350,8 @@ async function ensureSnapshotRemoteId(
 
 async function ensureRelatedRemoteId(remoteProjectId: string, entityType: SyncEntityType, entityId: unknown) {
   if (typeof entityId !== 'number') return null;
-  const table = tableMap[entityType];
+  if (entityType !== 'milestones') return null;
+  const table = db.milestones;
   if (!table) return null;
   const row = await table.get(entityId) as { remoteId?: string | null } | undefined;
   if (row?.remoteId) return row.remoteId;
@@ -367,8 +380,8 @@ async function resolveLocalReferenceId(
   remoteId: unknown,
   legacyId: unknown
 ) {
-  const table = tableMap[entityType];
-  if (!table || !localProjectId) return null;
+  if (entityType !== 'milestones' || !localProjectId) return null;
+  const table = db.milestones;
   const candidates = [
     typeof remoteId === 'string' ? remoteId : null,
     typeof legacyId === 'number' && remoteProjectId ? getRemoteRecordId(remoteProjectId, entityType, legacyId) : null,
@@ -390,6 +403,26 @@ async function resolveLocalReferenceId(
 }
 
 async function deserializeRemotePayload(record: RemoteRecord, localProjectId: number | null | undefined, payload: Record<string, unknown>) {
+  if (record.entity_type === 'archNodes') {
+    const id = String(payload.id ?? record.entity_id);
+    const type = payload.type === 'folder' || payload.type === 'file' ? payload.type : 'file';
+    const parentId = typeof payload.parentId === 'string' && payload.parentId !== id ? payload.parentId : null;
+    const normalizeIds = (value: unknown) => Array.isArray(value)
+      ? [...new Set(value.map(item => Number(item)).filter(item => Number.isFinite(item)))]
+      : [];
+    return {
+      ...payload,
+      id,
+      projectId: localProjectId ?? record.project_id,
+      name: typeof payload.name === 'string' && payload.name.trim() ? payload.name : type === 'folder' ? '未命名文件夹' : 'untitled',
+      type,
+      parentId,
+      extension: type === 'file' && typeof payload.extension === 'string' ? payload.extension : null,
+      relatedTaskIds: normalizeIds(payload.relatedTaskIds),
+      relatedMilestoneIds: normalizeIds(payload.relatedMilestoneIds),
+      description: typeof payload.description === 'string' ? payload.description : '',
+    };
+  }
   if (record.entity_type !== 'tasks') return payload;
   // Keep deprecated sprint links out of local task state while preserving milestone portability.
   return {
@@ -405,7 +438,7 @@ async function resolveChangeRemoteProjectId(change: SyncChange): Promise<string 
   if (typeof change.payload.remoteProjectId === 'string') return change.payload.remoteProjectId;
 
   const projectId = change.entityType === 'projects' ? change.entityId : change.projectId;
-  if (!projectId) return null;
+  if (typeof projectId !== 'number') return null;
   const project = await db.projects.get(projectId);
   return project?.remoteProjectId ?? null;
 }
@@ -646,6 +679,7 @@ export async function importSharedProjects(session: CloudSession): Promise<numbe
       await db.milestones.where('projectId').equals(local.id!).delete();
       await db.timelineEvents.where('projectId').equals(local.id!).delete();
       await db.diaryEntries.where('projectId').equals(local.id!).delete();
+      await db.archNodes.where('projectId').equals(local.id!).delete();
       await db.teamMembers.where('projectId').equals(local.id!).delete();
       await db.syncChanges.where('projectId').equals(local.id!).delete();
       await db.collaborationEvents.where('projectId').equals(local.id!).delete();
@@ -667,11 +701,25 @@ async function getRemoteRecords(session: CloudSession, remoteProjectIds: string[
   return supabaseFetch(`/rest/v1/${config.syncTable}?select=*&remote_project_id=in.(${encodeURIComponent(ids)})`, { method: 'GET' }, session.accessToken) as Promise<RemoteRecord[]>;
 }
 
+export async function fetchRecentRemoteSyncRecords(
+  session: CloudSession,
+  remoteProjectId: string,
+  limit = 80
+): Promise<RemoteSyncLogRecord[]> {
+  const config = assertConfigured();
+  const cappedLimit = Math.max(1, Math.min(limit, 200));
+  return supabaseFetch(
+    `/rest/v1/${config.syncTable}?select=*&remote_project_id=eq.${encodeURIComponent(remoteProjectId)}&order=updated_at.desc&limit=${cappedLimit}`,
+    { method: 'GET' },
+    session.accessToken
+  ) as Promise<RemoteSyncLogRecord[]>;
+}
+
 async function pushEntitySnapshot(
   session: CloudSession,
   remoteProjectId: string,
   entityType: SyncEntityType,
-  entityId: number,
+  entityId: number | string,
   projectId: number | null,
   payload: Record<string, unknown>,
   updatedAt: string
@@ -685,7 +733,7 @@ async function pushEntitySnapshot(
     user_id: authUserId,
     remote_project_id: remoteProjectId,
     entity_type: entityType,
-    entity_id: entityId,
+    entity_id: String(entityId),
     project_id: projectId,
     payload: snapshot.payload,
     updated_at: updatedAt,
@@ -727,6 +775,31 @@ async function pushChange(change: SyncChange, session: CloudSession): Promise<bo
     return false;
   }
 
+  if (change.operation === 'delete') {
+    const config = assertConfigured();
+    const remoteRecordId = typeof change.payload.remoteId === 'string'
+      ? change.payload.remoteId
+      : getRemoteRecordId(remoteProjectId, change.entityType, change.entityId);
+    const tombstone = {
+      id: remoteRecordId,
+      user_id: getSessionAuthUserId(session),
+      remote_project_id: remoteProjectId,
+      entity_type: change.entityType,
+      entity_id: String(change.entityId),
+      project_id: change.projectId,
+      payload: change.payload,
+      updated_at: change.localUpdatedAt,
+      deleted_at: change.localUpdatedAt,
+      client_id: getClientId(),
+    };
+    await supabaseFetch(`/rest/v1/${config.syncTable}?on_conflict=id`, {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify(tombstone),
+    }, session.accessToken);
+    return true;
+  }
+
   await pushEntitySnapshot(
     session,
     remoteProjectId,
@@ -737,16 +810,6 @@ async function pushChange(change: SyncChange, session: CloudSession): Promise<bo
     change.localUpdatedAt
   );
 
-  if (change.operation === 'delete') {
-    const config = assertConfigured();
-    const remoteRecordId = typeof change.payload.remoteId === 'string'
-      ? change.payload.remoteId
-      : getRemoteRecordId(remoteProjectId, change.entityType, change.entityId);
-    await supabaseFetch(`/rest/v1/${config.syncTable}?id=eq.${encodeURIComponent(remoteRecordId)}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ deleted_at: change.localUpdatedAt, updated_at: change.localUpdatedAt, user_id: getSessionAuthUserId(session), client_id: getClientId() }),
-    }, session.accessToken);
-  }
   return true;
 }
 
@@ -880,6 +943,25 @@ async function recordRemoteActivity(record: RemoteRecord, payload: Record<string
     return;
   }
 
+  if (record.entity_type === 'archNodes') {
+    const title = typeof payload.name === 'string' ? payload.name : `架构节点 ${record.entity_id}`;
+    const eventType: CollaborationEvent['type'] = previous ? 'arch_updated' : 'arch_created';
+    const exists = await hasRemoteActivity(projectId, eventType, record.entity_id, record.updated_at);
+    if (exists) return;
+    await recordCollaborationEvent({
+      projectId,
+      remoteProjectId: record.remote_project_id,
+      userId: record.user_id,
+      userName: '远程成员',
+      type: eventType,
+      targetType: 'archNodes',
+      targetId: record.entity_id,
+      title: previous ? `编辑了架构节点「${title}」` : `创建了架构节点「${title}」`,
+      description: `远程成员在架构图中${previous ? '编辑' : '创建'}了「${title}」。`,
+    });
+    return;
+  }
+
   if (record.entity_type !== 'tasks') return;
 
   const status = payload.status;
@@ -938,8 +1020,27 @@ async function recordRemoteActivity(record: RemoteRecord, payload: Record<string
 }
 
 async function recordRemoteDeletionActivity(record: RemoteRecord, existing: unknown, localProjectId: number | null | undefined) {
-  if (record.client_id === getClientId() || record.entity_type !== 'tasks') return;
+  if (record.client_id === getClientId()) return;
   const projectId = localProjectId ?? record.project_id ?? 0;
+  if (record.entity_type === 'archNodes') {
+    const previousNode = existing as Record<string, unknown> | undefined;
+    const title = typeof previousNode?.name === 'string' ? previousNode.name : `架构节点 ${record.entity_id}`;
+    const exists = await hasRemoteActivity(projectId, 'arch_deleted', record.entity_id, record.updated_at);
+    if (exists) return;
+    await recordCollaborationEvent({
+      projectId,
+      remoteProjectId: record.remote_project_id,
+      userId: record.user_id,
+      userName: '远程成员',
+      type: 'arch_deleted',
+      targetType: 'archNodes',
+      targetId: record.entity_id,
+      title: `删除了架构节点「${title}」`,
+      description: `远程成员在架构图中删除了「${title}」。`,
+    });
+    return;
+  }
+  if (record.entity_type !== 'tasks') return;
   const previousTask = existing as Record<string, unknown> | undefined;
   const title = typeof previousTask?.title === 'string' ? previousTask.title : `任务 ${record.entity_id}`;
   const exists = await hasRemoteActivity(projectId, 'task_deleted', record.entity_id, record.updated_at);
@@ -965,7 +1066,7 @@ async function applyRemoteRecord(record: RemoteRecord, pending: SyncChange[]) {
   const remoteIdentity = record.id;
   const localPending = pending.find(change => (
     change.entityType === record.entity_type &&
-    (change.entityId === record.entity_id || change.payload.remoteId === remoteIdentity)
+    (String(change.entityId) === String(record.entity_id) || change.payload.remoteId === remoteIdentity)
   ));
   if (localPending && record.client_id !== getClientId()) {
     await db.syncChanges.update(localPending.id!, { conflict: true });
@@ -1020,8 +1121,8 @@ async function applyRemoteRecord(record: RemoteRecord, pending: SyncChange[]) {
       .first();
 
     if (record.deleted_at) {
-      const targetId = (existing as { id?: number } | undefined)?.id;
-      if (typeof targetId === 'number') await table.delete(targetId);
+      const targetId = (existing as { id?: number | string } | undefined)?.id;
+      if (typeof targetId === 'number' || typeof targetId === 'string') await table.delete(targetId as never);
       await recordRemoteDeletionActivity(record, existing, localProject?.id);
       return;
     }
@@ -1029,7 +1130,7 @@ async function applyRemoteRecord(record: RemoteRecord, pending: SyncChange[]) {
     const previous = existing ? { ...(existing as unknown as Record<string, unknown>) } : null;
     const payload = await deserializeRemotePayload(record, localProject?.id, {
       ...record.payload,
-      id: (existing as { id?: number } | undefined)?.id,
+      id: (existing as { id?: number | string } | undefined)?.id ?? (record.payload as { id?: number | string }).id ?? record.entity_id,
       projectId: localProject?.id ?? record.project_id,
       remoteProjectId: (record.payload as { remoteProjectId?: string | null }).remoteProjectId,
       remoteId: remoteIdentity,
@@ -1038,6 +1139,12 @@ async function applyRemoteRecord(record: RemoteRecord, pending: SyncChange[]) {
     await table.put(payload as never);
     await recordRemoteActivity(record, payload, previous);
   });
+}
+
+async function repairArchNodeParents(projectIds: number[]) {
+  for (const projectId of [...new Set(projectIds)]) {
+    await normalizeArchRootNodes(projectId);
+  }
 }
 
 export async function runCloudSync(session: CloudSession): Promise<SyncState> {
@@ -1067,6 +1174,11 @@ export async function runCloudSync(session: CloudSession): Promise<SyncState> {
   for (const record of remoteRecords) {
     await applyRemoteRecord(record, remainingPending);
   }
+  const localArchProjectIds = (await db.projects.toArray())
+    .filter(project => project.remoteProjectId && remoteProjectIds.includes(project.remoteProjectId))
+    .map(project => project.id)
+    .filter((id): id is number => typeof id === 'number');
+  await repairArchNodeParents(localArchProjectIds);
 
   const finalPending = await getSyncablePendingChanges();
   const pendingChanges = finalPending.length;
@@ -1148,11 +1260,12 @@ export async function publishProjectToCloud(session: CloudSession, project: Proj
     await pushEntitySnapshot(session, remoteId, 'projects', updatedProject.id, updatedProject.id, updatedProject as unknown as Record<string, unknown>, updatedProject.updatedAt);
   }
 
-  const [tasks, milestones, timelineEvents, diaryEntries] = await Promise.all([
+  const [tasks, milestones, timelineEvents, diaryEntries, archNodes] = await Promise.all([
     db.tasks.where('projectId').equals(project.id!).toArray(),
     db.milestones.where('projectId').equals(project.id!).toArray(),
     db.timelineEvents.where('projectId').equals(project.id!).toArray(),
     db.diaryEntries.where('projectId').equals(project.id!).toArray(),
+    db.archNodes.where('projectId').equals(project.id!).toArray(),
   ]);
   const taskIds = tasks.map(task => task.id).filter((id): id is number => typeof id === 'number');
   const comments = taskIds.length > 0 ? await db.comments.where('taskId').anyOf(taskIds).toArray() : [];
@@ -1167,6 +1280,9 @@ export async function publishProjectToCloud(session: CloudSession, project: Proj
   }
   for (const entry of diaryEntries) {
     if (entry.id) await pushEntitySnapshot(session, remoteId, 'diaryEntries', entry.id, entry.projectId, entry as unknown as Record<string, unknown>, entry.updatedAt);
+  }
+  for (const node of archNodes) {
+    await pushEntitySnapshot(session, remoteId, 'archNodes', node.id, node.projectId, node as unknown as Record<string, unknown>, node.updatedAt);
   }
   for (const comment of comments) {
     if (comment.id) await pushEntitySnapshot(session, remoteId, 'comments', comment.id, project.id!, comment as unknown as Record<string, unknown>, comment.createdAt);

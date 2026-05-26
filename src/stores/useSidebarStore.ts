@@ -37,6 +37,7 @@ const DEFAULT_ITEMS: Array<Omit<SidebarItem, 'visible'>> = [
   { to: '/portfolio', label: '项目总览', weight: 48, reason: '多项目管理时使用' },
   { to: '/focus-sessions', label: '专注记录', weight: 46, reason: '统计明细，番茄钟已覆盖入口' },
   { to: '/dependencies', label: '任务依赖', weight: 42, reason: '复杂任务网络时使用' },
+  { to: '/architecture', label: '架构图', weight: 40, reason: '项目结构规划时使用' },
   { to: '/achievements', label: '成就系统', weight: 30, reason: '激励型模块，不占默认导航' },
 ];
 

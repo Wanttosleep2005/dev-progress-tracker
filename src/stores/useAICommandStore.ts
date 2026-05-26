@@ -11,14 +11,19 @@ import { useCloudStore } from './useCloudStore';
 
 const STORAGE_KEY = 'devtrack-ai-command-settings';
 
+function normalizeSettings(raw: Partial<AICommandSettings>): AICommandSettings {
+  const reasoningEffort = raw.reasoningEffort === 'max' ? 'max' : defaultAICommandSettings.reasoningEffort;
+  return { ...defaultAICommandSettings, ...raw, reasoningEffort, apiKey: '' };
+}
+
 function loadSettings(): AICommandSettings {
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    // 开发环境强制使用 Vite 代理路径，忽略 localStorage 中的旧端点
+    // 兼容旧版本保存的 off 推理选项，并在开发环境强制使用 Vite 代理路径。
     if (import.meta.env.DEV) {
-      return { ...defaultAICommandSettings, ...stored, endpoint: defaultAICommandSettings.endpoint, apiKey: '' };
+      return { ...normalizeSettings(stored), endpoint: defaultAICommandSettings.endpoint };
     }
-    return { ...defaultAICommandSettings, ...stored, apiKey: '' };
+    return normalizeSettings(stored);
   } catch {
     return defaultAICommandSettings;
   }
@@ -67,9 +72,10 @@ export const useAICommandStore = create<AICommandStore>((set, get) => ({
     const { currentProjectId, projects } = useAppStore.getState();
     const project = projects.find(item => item.id === currentProjectId) || null;
     const tasks = useTaskStore.getState().tasks;
+    const milestones = useMilestoneStore.getState().milestones;
     set({ loading: true, error: '', plan: null });
     try {
-      const plan = await generateAICommandPlan(prompt, get().settings, { project, tasks });
+      const plan = await generateAICommandPlan(prompt, get().settings, { project, tasks, milestones });
       set({ plan, loading: false });
     } catch (error) {
       set({ error: error instanceof Error ? error.message : '指令生成失败', loading: false });

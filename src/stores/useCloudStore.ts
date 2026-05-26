@@ -232,11 +232,12 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
       const currentProjectId = useAppStore.getState().currentProjectId;
       if (currentProjectId) {
         await get().loadTeam(currentProjectId);
-        const [{ useTaskStore }, { useMilestoneStore }, { useTimelineStore }, { useDiaryStore }] = await Promise.all([
+        const [{ useTaskStore }, { useMilestoneStore }, { useTimelineStore }, { useDiaryStore }, { useArchStore }] = await Promise.all([
           import('./useTaskStore'),
           import('./useMilestoneStore'),
           import('./useTimelineStore'),
           import('./useDiaryStore'),
+          import('./useArchStore'),
         ]);
         // Realtime writes land in IndexedDB first; reload every visible project store from that local truth.
         await Promise.all([
@@ -244,6 +245,7 @@ export const useCloudStore = create<CloudStore>((set, get) => ({
           useMilestoneStore.getState().load(currentProjectId),
           useTimelineStore.getState().load(currentProjectId),
           useDiaryStore.getState().load(currentProjectId),
+          useArchStore.getState().load(currentProjectId),
         ]);
       }
     } catch (error) {

@@ -89,6 +89,11 @@ function getRealtimeRecord(payload: unknown): Record<string, unknown> | null {
   return record && typeof record === 'object' ? record as Record<string, unknown> : null;
 }
 
+function isOwnRealtimeEcho(record: Record<string, unknown> | null, session: CloudSession) {
+  // The browser client id is shared across logins, so also require the Supabase user id before ignoring an echo.
+  return record?.client_id === getClientId() && record.user_id === session.user.id;
+}
+
 function buildJoinPayload(session: CloudSession, remoteProjectId: string) {
   return {
     access_token: session.accessToken,
@@ -159,16 +164,19 @@ export function subscribeProjectRealtime(options: RealtimeSubscriptionOptions) {
         failureCount = 0;
         options.onStatus?.('connected');
       } else if (status === 'error') {
-        options.onStatus?.('error');
-        options.onError?.('Realtime 订阅被 Supabase 拒绝，请确认表已加入 supabase_realtime publication 且当前用户有项目权限。');
+        // A rejected realtime join should not block collaboration; REST sync remains the source of truth.
+        options.onStatus?.('disconnected');
+        if (Date.now() - connectingSince > 30_000) {
+          options.onError?.('Realtime 订阅未建立，已保留自动同步兜底。请确认已执行 Supabase 迁移 architecture-sync.sql 与 arch-nodes-realtime.sql。');
+        }
       }
       return;
     }
 
     if (message.event === 'postgres_changes') {
       const record = getRealtimeRecord(message.payload);
-      // Ignore our own sync_records echo; otherwise every local push causes a status loop.
-      if (record?.client_id === getClientId()) return;
+      // Ignore only the current user's own sync_records echo; another account may share this browser client id during testing.
+      if (isOwnRealtimeEcho(record, options.session)) return;
       scheduleSync(options.onChanged, options.onStatus);
     }
   });

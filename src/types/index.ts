@@ -8,7 +8,7 @@ export type ViewMode = 'kanban' | 'list';
 export type TaskSource = 'board' | 'daily';
 export type TeamRole = 'owner' | 'editor' | 'viewer';
 export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'conflict';
-export type SyncEntityType = 'projects' | 'tasks' | 'milestones' | 'timelineEvents' | 'diaryEntries' | 'sprints' | 'comments';
+export type SyncEntityType = 'projects' | 'tasks' | 'milestones' | 'timelineEvents' | 'diaryEntries' | 'sprints' | 'comments' | 'archNodes';
 export type SyncOperation = 'upsert' | 'delete';
 export type CollaborationEventType =
   | 'project_shared'
@@ -23,7 +23,10 @@ export type CollaborationEventType =
   | 'milestone_completed'
   | 'sprint_updated'
   | 'diary_created'
-  | 'comment_added';
+  | 'comment_added'
+  | 'arch_created'
+  | 'arch_updated'
+  | 'arch_deleted';
 export type PomodoroPhase = 'work' | 'short_break' | 'long_break';
 export type AIActionType = 'create_task' | 'create_today_task' | 'create_milestone' | 'create_diary' | 'create_event' | 'update_task' | 'update_milestone' | 'configure_pomodoro';
 export type AIProvider = 'deepseek_chat' | 'custom_chat';
@@ -167,6 +170,23 @@ export interface Sprint {
   updatedAt: string;
 }
 
+export interface ArchNode {
+  id: string;
+  projectId: number;
+  name: string;
+  type: 'folder' | 'file';
+  extension?: string | null;
+  relatedTaskIds?: number[];
+  relatedMilestoneIds?: number[];
+  description?: string;
+  parentId: string | null;
+  sortOrder: number;
+  remoteId?: string | null;
+  syncUpdatedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface UserSetting {
   id?: number;
   userId: string;
@@ -214,7 +234,7 @@ export interface SyncState {
 export interface SyncChange {
   id?: number;
   entityType: SyncEntityType;
-  entityId: number;
+  entityId: number | string;
   projectId: number | null;
   remoteProjectId?: string | null;
   operation: SyncOperation;
@@ -294,7 +314,7 @@ export interface AICommandSettings {
   apiKey: string;
   endpoint: string;
   model: string;
-  reasoningEffort: 'off' | 'high' | 'max';
+  reasoningEffort: 'high' | 'max';
   autoSyncAfterExecute: boolean;
 }
 

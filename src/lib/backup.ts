@@ -21,6 +21,7 @@ export interface DevTrackBackup {
     inviteLinks: unknown[];
     sprints: unknown[];
     comments: unknown[];
+    archNodes?: unknown[];
     userSettings?: unknown[];
     localStorage: Record<string, string>;
   };
@@ -225,6 +226,7 @@ export async function createBackup(): Promise<DevTrackBackup> {
       inviteLinks: await db.inviteLinks.toArray(),
       sprints: await db.sprints.toArray(),
       comments: await db.comments.toArray(),
+      archNodes: await db.archNodes.toArray(),
       userSettings: await db.userSettings.toArray(),
       localStorage: localStorageData,
     },
@@ -256,6 +258,7 @@ function collectReferencedProjectIds(backup: DevTrackBackup) {
     backup.data.inviteLinks,
     backup.data.sprints,
     backup.data.syncChanges,
+    backup.data.archNodes || [],
   ]) {
     for (const row of table) {
       addProjectId((row as { projectId?: unknown }).projectId);
@@ -321,6 +324,7 @@ export async function restoreBackup(backup: DevTrackBackup) {
       db.inviteLinks,
       db.sprints,
       db.comments,
+      db.archNodes,
       db.userSettings,
     ], async () => {
       await Promise.all([
@@ -338,6 +342,7 @@ export async function restoreBackup(backup: DevTrackBackup) {
         db.inviteLinks.clear(),
         db.sprints.clear(),
         db.comments.clear(),
+        db.archNodes.clear(),
         db.userSettings.clear(),
       ]);
 
@@ -356,6 +361,7 @@ export async function restoreBackup(backup: DevTrackBackup) {
         db.inviteLinks.bulkPut(normalizedBackup.data.inviteLinks as never[]),
         db.sprints.bulkPut(normalizedBackup.data.sprints as never[]),
         db.comments.bulkPut(normalizedBackup.data.comments as never[]),
+        db.archNodes.bulkPut((normalizedBackup.data.archNodes || []) as never[]),
         db.userSettings.bulkPut((normalizedBackup.data.userSettings || []) as never[]),
       ]);
     });

@@ -1,5 +1,45 @@
 # Changelog
 
+## v1.1.0 - 2026-05-26
+
+### Added
+
+- Added Architecture Diagram page (`/architecture`) powered by React Flow. Supports
+  folder/file tree visualization, drag-and-drop reparenting, task/milestone
+  association, AI-generated architecture suggestions, and Supabase realtime sync.
+- Added Sync Console for project Owners. Displays live sync logs, pending queue,
+  realtime connection status, remote record inspection, and diagnostics export.
+- Added `archNodes` IndexedDB table (schema v14) with full CRUD, graph cycle
+  repair, duplicate root merging, and malformed placeholder cleanup.
+- Added `archNodes` cloud sync support including realtime subscription, upsert,
+  and delete propagation.
+- Added barycenter-based layout algorithm to Task Dependencies graph for fewer
+  edge crossings and more readable node placement.
+
+### Changed
+
+- Improved AI Command prompt engineering: richer context (milestones, dependencies,
+  planned dates), stricter field validation, explicit unsupported-action guidance,
+  quality requirements for descriptions, and better tag/priority inference rules.
+- Removed `off` option from AI reasoning effort; minimum is now `high`.
+- Expanded AI context window from 30 to 50 existing tasks and added milestone list.
+- Updated `SyncEntityType` and `CollaborationEventType` to include architecture
+  events (`arch_created`, `arch_updated`, `arch_deleted`).
+- Adjusted Task Dependencies node spacing for denser but clearer layouts.
+
+### Database
+
+- Schema version bumped to 14.
+- `archNodes` table indexed on `id`, `projectId`, `parentId`, and compound
+  `[projectId+parentId]`.
+- `SyncChange.entityId` widened from `number` to `number | string` to support
+  string-keyed architecture nodes.
+
+### Verification
+
+- `npx tsc --noEmit --pretty false`
+- `npm run build`
+
 ## v1.0.0 - 2026-05-24
 
 DevTrack 1.0 is the first stable local-first release for individual developers

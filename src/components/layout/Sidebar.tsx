@@ -22,7 +22,9 @@ import {
   Plus,
   Route,
   Settings,
+  Share2,
   Stethoscope,
+  Terminal,
   Trophy,
   Upload,
   UserCircle,
@@ -38,6 +40,7 @@ import FocusTimerPanel from '../FocusTimer';
 import NotificationBell from '../NotificationBell';
 import { applyTemplate, PROJECT_TEMPLATES } from '../../lib/templates';
 import ProjectFolderIcon from '../ProjectFolderIcon';
+import SyncConsole from '../collaboration/SyncConsole';
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -45,6 +48,7 @@ export default function Sidebar() {
   const { projects, currentProjectId, setCurrentProject, addProject, updateProject } = useAppStore();
   const sidebarItems = useSidebarStore(state => state.items);
   const session = useCloudStore(state => state.session);
+  const canOwn = useCloudStore(state => state.canOwn);
   const collaborationMode = usePreferences(state => state.collaborationMode);
   const addToast = useToast(state => state.add);
   const inviteLocked = location.pathname.startsWith('/invite') && !session;
@@ -58,8 +62,10 @@ export default function Sidebar() {
   const [editingDeadlineId, setEditingDeadlineId] = useState<number | null>(null);
   const [editDeadlineValue, setEditDeadlineValue] = useState('');
   const [templateId, setTemplateId] = useState('');
+  const [consoleOpen, setConsoleOpen] = useState(false);
 
   const currentProject = projects.find(project => project.id === currentProjectId);
+  const showSyncConsole = Boolean(currentProjectId && collaborationMode !== 'local' && canOwn(currentProjectId));
   const belongsToProject = (projectId: number) => (item: { projectId?: number | null }) => item.projectId === projectId;
 
   const navItems = [
@@ -69,6 +75,7 @@ export default function Sidebar() {
     { to: '/today-tasks', icon: AlarmClock, label: '今日任务' },
     { to: '/tasks', icon: Kanban, label: '任务看板' },
     { to: '/dependencies', icon: Workflow, label: '任务依赖' },
+    { to: '/architecture', icon: Share2, label: '架构图' },
     { to: '/pomodoro', icon: AlarmClock, label: '番茄钟' },
     { to: '/focus-sessions', icon: History, label: '专注记录' },
     { to: '/milestones', icon: Flag, label: '里程碑' },
@@ -329,6 +336,20 @@ export default function Sidebar() {
           <FocusTimerPanel />
         </div>
 
+        {showSyncConsole && (
+          <button
+            onClick={() => setConsoleOpen(value => !value)}
+            className={`mb-2 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm transition ${
+              consoleOpen
+                ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200'
+                : 'border-white/[0.06] bg-white/[0.03] text-slate-300 hover:bg-white/[0.04] hover:text-white'
+            }`}
+          >
+            <Terminal size={15} className="text-emerald-300" />
+            同步控制台
+          </button>
+        )}
+
         <div className="grid grid-cols-2 gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-2">
           <button
             onClick={() => {
@@ -469,6 +490,10 @@ export default function Sidebar() {
             </div>
           </div>
         </div>
+      )}
+
+      {consoleOpen && showSyncConsole && (
+        <SyncConsole onClose={() => setConsoleOpen(false)} />
       )}
     </aside>
   );

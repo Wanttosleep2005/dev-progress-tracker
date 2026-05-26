@@ -10,6 +10,7 @@ import { useTaskStore } from '../../stores/useTaskStore';
 import { useMilestoneStore } from '../../stores/useMilestoneStore';
 import { useTimelineStore } from '../../stores/useTimelineStore';
 import { useDiaryStore } from '../../stores/useDiaryStore';
+import { useArchStore } from '../../stores/useArchStore';
 import { useInitTheme } from '../../stores/useTheme';
 import { useToast } from '../../stores/useToast';
 import { useStatsStore } from '../../stores/useStatsStore';
@@ -73,6 +74,7 @@ export default function Layout() {
   const milestoneItems = useMilestoneStore(state => state.milestones);
   const loadTimeline = useTimelineStore(state => state.load);
   const loadDiary = useDiaryStore(state => state.load);
+  const loadArch = useArchStore(state => state.load);
   const diaryEntries = useDiaryStore(state => state.entries);
   const { toasts, add: addToast } = useToast();
   const { openPalette, query, setQuery } = useCommandPalette();
@@ -146,8 +148,9 @@ export default function Layout() {
     loadMilestones(currentProjectId);
     loadTimeline(currentProjectId);
     loadDiary(currentProjectId);
+    loadArch(currentProjectId);
     loadTeam(currentProjectId);
-  }, [currentProjectId, loadTasks, loadMilestones, loadTimeline, loadDiary, loadTeam]);
+  }, [currentProjectId, loadTasks, loadMilestones, loadTimeline, loadDiary, loadArch, loadTeam]);
 
   useEffect(() => {
     if (collaborationMode !== 'cloud' || !session || !currentProjectId) {

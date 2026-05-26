@@ -113,7 +113,6 @@ export default function AICommandCenter() {
             </label>
             <label className="block text-xs text-slate-500">推理力度
               <select value={settings.reasoningEffort} onChange={event => updateSettings({ reasoningEffort: event.target.value as AICommandSettings['reasoningEffort'] })} className="custom-select mt-1 w-full rounded-xl border border-white/[0.06] px-3 py-2 text-sm">
-                <option value="off">关闭 — 不推理，最快最省 token</option>
                 <option value="high">高 — 默认推理强度</option>
                 <option value="max">最强 — 深度推理，适合复杂多动作场景</option>
               </select>

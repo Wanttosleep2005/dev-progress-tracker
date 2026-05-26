@@ -9,6 +9,7 @@ const TodayTasks = lazy(() => import('./pages/TodayTasks'));
 const FocusSessions = lazy(() => import('./pages/FocusSessions'));
 const TaskBoard = lazy(() => import('./pages/TaskBoard'));
 const TaskDependencies = lazy(() => import('./pages/TaskDependencies'));
+const Architecture = lazy(() => import('./pages/Architecture'));
 const Pomodoro = lazy(() => import('./pages/Pomodoro'));
 const Milestones = lazy(() => import('./pages/Milestones'));
 const Timeline = lazy(() => import('./pages/Timeline'));
@@ -49,6 +50,7 @@ export default function App() {
             <Route path="focus-sessions" element={<FocusSessions />} />
             <Route path="tasks" element={<TaskBoard />} />
             <Route path="dependencies" element={<TaskDependencies />} />
+            <Route path="architecture" element={<Architecture />} />
             <Route path="pomodoro" element={<Pomodoro />} />
             <Route path="milestones" element={<Milestones />} />
             <Route path="timeline" element={<Timeline />} />

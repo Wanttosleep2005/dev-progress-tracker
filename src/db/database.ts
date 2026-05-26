@@ -1,7 +1,9 @@
 import Dexie from 'dexie';
 import type { Table } from 'dexie';
+import { createClientId } from '../lib/id';
 import type {
   Achievement,
+  ArchNode,
   CollaborationEvent,
   DiaryEntry,
   InviteLink,
@@ -34,6 +36,7 @@ class DevTrackDatabase extends Dexie {
   sprints!: Table<Sprint, number>;
   comments!: Table<TaskComment, number>;
   userSettings!: Table<UserSetting, number>;
+  archNodes!: Table<ArchNode, string>;
 
   constructor() {
     super('DevTrackDB');
@@ -161,6 +164,11 @@ class DevTrackDatabase extends Dexie {
           }
         }
       });
+
+    this.version(14)
+      .stores({
+        archNodes: '&id, projectId, parentId, [projectId+parentId]',
+      });
   }
 }
 
@@ -179,7 +187,7 @@ export async function withoutSyncTracking<T>(operation: () => Promise<T>): Promi
 
 async function queueSyncChange(
   entityType: SyncChange['entityType'],
-  entityId: number,
+  entityId: number | string,
   projectId: number | null,
   operation: SyncChange['operation'],
   payload: Record<string, unknown>,
@@ -250,6 +258,7 @@ export async function deleteProject(id: number): Promise<void> {
       db.inviteLinks,
       db.sprints,
       db.comments,
+      db.archNodes,
     ],
     async () => {
       const tasks = await db.tasks.where('projectId').equals(id).toArray();
@@ -265,6 +274,7 @@ export async function deleteProject(id: number): Promise<void> {
       await db.notifications.where('projectId').equals(id).delete();
       await db.inviteLinks.where('projectId').equals(id).delete();
       await db.sprints.where('projectId').equals(id).delete();
+      await db.archNodes.where('projectId').equals(id).delete();
       if (taskIds.length > 0) await db.comments.where('taskId').anyOf(taskIds).delete();
     }
   );
@@ -298,6 +308,23 @@ export async function cloneProject(id: number, newName: string): Promise<number>
     await db.milestones.add({
       ...milestoneRest,
       projectId: newProjectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  const archNodes = await db.archNodes.where('projectId').equals(id).toArray();
+  const clonedNodeIds = new Map<string, string>();
+  archNodes.forEach(node => clonedNodeIds.set(node.id, createClientId()));
+  for (const node of archNodes) {
+    const { createdAt: _nodeCreatedAt, updatedAt: _nodeUpdatedAt, remoteId: _remoteId, syncUpdatedAt: _syncUpdatedAt, ...nodeRest } = node;
+    await db.archNodes.add({
+      ...nodeRest,
+      id: clonedNodeIds.get(node.id)!,
+      parentId: node.parentId ? clonedNodeIds.get(node.parentId) ?? null : null,
+      projectId: newProjectId,
+      remoteId: null,
+      syncUpdatedAt: now,
       createdAt: now,
       updatedAt: now,
     });
@@ -525,4 +552,170 @@ export async function deleteComment(id: number): Promise<void> {
   const task = before ? await db.tasks.get(before.taskId) : null;
   await db.comments.delete(id);
   await queueSyncChange('comments', id, task?.projectId ?? null, 'delete', { id }, before?.createdAt ?? null);
+}
+
+export async function getArchNodesByProject(projectId: number): Promise<ArchNode[]> {
+  return db.archNodes.where('projectId').equals(projectId).sortBy('sortOrder');
+}
+
+const ARCH_FILE_EXTENSIONS = new Set(['py', 'js', 'ts', 'tsx', 'html', 'css', 'json', 'md', 'yml', 'sql', 'dockerfile', 'other']);
+
+function normalizeArchIdList(value: unknown) {
+  return Array.isArray(value)
+    ? [...new Set(value.map(id => Number(id)).filter(id => Number.isFinite(id)))]
+    : [];
+}
+
+function sameNumberList(left: unknown, right: number[]) {
+  if (!Array.isArray(left)) return false;
+  const normalized = normalizeArchIdList(left);
+  return normalized.length === right.length && normalized.every((value, index) => value === right[index]);
+}
+
+function safeArchParentId(node: ArchNode, nodesById: Map<string, ArchNode>) {
+  const rawParentId = typeof node.parentId === 'string' ? node.parentId : null;
+  if (!rawParentId || rawParentId === node.id) return null;
+  const parent = nodesById.get(rawParentId);
+  if (!parent || parent.type !== 'folder') return null;
+
+  const seen = new Set<string>([node.id]);
+  let cursor: ArchNode | undefined = parent;
+  while (cursor) {
+    if (seen.has(cursor.id)) return null;
+    seen.add(cursor.id);
+    cursor = cursor.parentId ? nodesById.get(cursor.parentId) : undefined;
+  }
+  return rawParentId;
+}
+
+export async function repairArchNodeGraph(projectId: number): Promise<void> {
+  const nodes = await db.archNodes.where('projectId').equals(projectId).toArray();
+  if (nodes.length === 0) return;
+  const nodesById = new Map(nodes.map(node => [node.id, node]));
+
+  await withoutSyncTracking(async () => {
+    for (const node of nodes) {
+      const patch: Partial<ArchNode> = {};
+      const safeParent = safeArchParentId(node, nodesById);
+      if ((node.parentId ?? null) !== safeParent) patch.parentId = safeParent;
+
+      const raw = node as ArchNode & {
+        type?: unknown;
+        extension?: unknown;
+        relatedTaskIds?: unknown;
+        relatedMilestoneIds?: unknown;
+        description?: unknown;
+        sortOrder?: unknown;
+        name?: unknown;
+      };
+      const safeType: ArchNode['type'] = raw.type === 'folder' || raw.type === 'file' ? raw.type : 'file';
+      if (node.type !== safeType) patch.type = safeType;
+
+      const safeExtension = safeType === 'file' && typeof raw.extension === 'string' && ARCH_FILE_EXTENSIONS.has(raw.extension)
+        ? raw.extension
+        : safeType === 'file' ? 'other' : null;
+      if ((node.extension ?? null) !== safeExtension) patch.extension = safeExtension;
+
+      const relatedTaskIds = normalizeArchIdList(raw.relatedTaskIds);
+      if (!sameNumberList(raw.relatedTaskIds, relatedTaskIds)) patch.relatedTaskIds = relatedTaskIds;
+
+      const relatedMilestoneIds = normalizeArchIdList(raw.relatedMilestoneIds);
+      if (!sameNumberList(raw.relatedMilestoneIds, relatedMilestoneIds)) patch.relatedMilestoneIds = relatedMilestoneIds;
+
+      if (typeof raw.description !== 'string') patch.description = '';
+      if (typeof raw.name !== 'string' || raw.name.trim() === '') patch.name = safeType === 'folder' ? '未命名文件夹' : 'untitled';
+      if (typeof raw.sortOrder !== 'number' || !Number.isFinite(raw.sortOrder)) patch.sortOrder = 0;
+
+      if (Object.keys(patch).length > 0) {
+        // Remote archNodes can arrive from older clients with invalid parent graphs; repair locally before rendering.
+        await db.archNodes.update(node.id, {
+          ...patch,
+          syncUpdatedAt: node.syncUpdatedAt ?? node.updatedAt,
+        });
+      }
+    }
+  });
+}
+
+function isMalformedArchPlaceholder(node: ArchNode) {
+  return node.parentId === null &&
+    node.type === 'file' &&
+    node.name === 'untitled' &&
+    !node.description &&
+    (!Array.isArray(node.relatedTaskIds) || node.relatedTaskIds.length === 0) &&
+    (!Array.isArray(node.relatedMilestoneIds) || node.relatedMilestoneIds.length === 0);
+}
+
+export async function normalizeArchRootNodes(projectId: number): Promise<void> {
+  await repairArchNodeGraph(projectId);
+  const nodes = await db.archNodes.where('projectId').equals(projectId).toArray();
+  if (nodes.length === 0) return;
+
+  const project = await db.projects.get(projectId);
+  const projectName = project?.name.trim().toLowerCase() || '';
+  const rootFolders = nodes
+    .filter(node => node.parentId === null && node.type === 'folder')
+    .sort((a, b) => {
+      const aMatches = projectName && a.name.trim().toLowerCase() === projectName ? 0 : 1;
+      const bMatches = projectName && b.name.trim().toLowerCase() === projectName ? 0 : 1;
+      return aMatches - bMatches || a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt);
+    });
+  const canonicalRoot = rootFolders[0] ?? null;
+
+  if (canonicalRoot && rootFolders.length > 1) {
+    for (const duplicateRoot of rootFolders.slice(1)) {
+      const directChildren = nodes.filter(node => node.parentId === duplicateRoot.id);
+      for (const child of directChildren) {
+        // Merge duplicated project roots created by load/sync races instead of keeping parallel ANME roots.
+        await updateArchNode(child.id, {
+          parentId: canonicalRoot.id,
+          sortOrder: (nodes.filter(node => node.parentId === canonicalRoot.id).length + directChildren.indexOf(child) + 1),
+        });
+      }
+      await deleteArchNode(duplicateRoot.id);
+    }
+  }
+
+  for (const placeholder of nodes.filter(isMalformedArchPlaceholder)) {
+    // A root-level "untitled" file is a malformed tombstone/payload artifact, not a user-created architecture node.
+    await deleteArchNode(placeholder.id);
+  }
+}
+
+export async function addArchNode(node: Omit<ArchNode, 'createdAt' | 'updatedAt'>): Promise<string> {
+  const now = new Date().toISOString();
+  const record: ArchNode = { ...node, createdAt: now, updatedAt: now, syncUpdatedAt: now };
+  await db.archNodes.add(record);
+  await queueSyncChange('archNodes', record.id, record.projectId, 'upsert', record as unknown as Record<string, unknown>, null);
+  return record.id;
+}
+
+export async function updateArchNode(id: string, changes: Partial<ArchNode>): Promise<void> {
+  const before = await db.archNodes.get(id);
+  const patch = { ...changes, updatedAt: new Date().toISOString(), syncUpdatedAt: new Date().toISOString() };
+  await db.archNodes.update(id, patch);
+  const after = await db.archNodes.get(id);
+  if (after) await queueSyncChange('archNodes', id, after.projectId, 'upsert', after as unknown as Record<string, unknown>, before?.updatedAt ?? null);
+}
+
+export async function deleteArchNode(id: string): Promise<void> {
+  const before = await db.archNodes.get(id);
+  if (!before) return;
+  const allNodes = await db.archNodes.where('projectId').equals(before.projectId).toArray();
+  const descendants = new Set<string>();
+  const collect = (parentId: string) => {
+    allNodes.filter(node => node.parentId === parentId).forEach(node => {
+      if (node.id === id || descendants.has(node.id)) return;
+      descendants.add(node.id);
+      collect(node.id);
+    });
+  };
+  collect(id);
+  await db.transaction('rw', [db.archNodes], async () => {
+    await db.archNodes.bulkDelete([...descendants, id]);
+  });
+  for (const childId of descendants) {
+    await queueSyncChange('archNodes', childId, before.projectId, 'delete', { id: childId }, before.updatedAt);
+  }
+  await queueSyncChange('archNodes', id, before.projectId, 'delete', { id }, before.updatedAt);
 }

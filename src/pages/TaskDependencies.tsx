@@ -40,8 +40,9 @@ type DependencyEdge = Edge<{ dependency: true }>;
 
 const NODE_WIDTH = 280;
 const NODE_HEIGHT = 160;
-const COLUMN_GAP = 400;
-const ROW_GAP = 200;
+const COLUMN_GAP = 380;
+const MIN_ROW_GAP = 176;
+const MAX_ROW_GAP = 216;
 const SIDE_SOURCE_HANDLE_CLASS = '!h-12 !w-4 !rounded-full !border-2 !border-cyan-400/60 !bg-cyan-400/40 !shadow-[0_0_12px_rgba(34,211,238,0.35)] !transition hover:!bg-cyan-300/70';
 const SIDE_TARGET_HANDLE_CLASS = '!h-12 !w-4 !rounded-full !border-2 !border-cyan-400/40 !bg-[#08111f]/80 !shadow-[0_0_12px_rgba(34,211,238,0.2)] !transition hover:!bg-cyan-950';
 const EDGE_SOURCE_HANDLE_CLASS = '!h-4 !w-12 !rounded-full !border-2 !border-cyan-400/60 !bg-cyan-400/40 !shadow-[0_0_12px_rgba(34,211,238,0.3)] !transition hover:!bg-cyan-300/65';
@@ -74,6 +75,15 @@ function wouldCreateCycle(tasks: Task[], dependencyId: number, targetId: number)
 
 function layoutTasks(tasks: Task[]) {
   const byId = new Map(tasks.filter(task => task.id).map(task => [task.id!, task]));
+  const dependentsById = new Map<number, number[]>();
+  tasks.forEach(task => {
+    if (!task.id) return;
+    getTaskDependencyIds(task).forEach(dependencyId => {
+      if (!byId.has(dependencyId)) return;
+      dependentsById.set(dependencyId, [...(dependentsById.get(dependencyId) ?? []), task.id!]);
+    });
+  });
+
   const depthCache = new Map<number, number>();
   const getDepth = (task: Task, stack = new Set<number>()): number => {
     if (!task.id) return 0;
@@ -89,21 +99,70 @@ function layoutTasks(tasks: Task[]) {
     return depth;
   };
 
-  const groups = new Map<number, Task[]>();
+  const layers = new Map<number, Task[]>();
   tasks.forEach(task => {
     const depth = getDepth(task);
-    groups.set(depth, [...(groups.get(depth) ?? []), task]);
+    layers.set(depth, [...(layers.get(depth) ?? []), task]);
   });
 
+  const orderedLayers = new Map<number, Task[]>();
+  [...layers.entries()].forEach(([depth, layer]) => {
+    orderedLayers.set(depth, layer.slice().sort((a, b) => {
+      const aId = a.id ?? 0;
+      const bId = b.id ?? 0;
+      return getTaskDependencyIds(a).length - getTaskDependencyIds(b).length ||
+        (dependentsById.get(bId)?.length ?? 0) - (dependentsById.get(aId)?.length ?? 0) ||
+        a.title.localeCompare(b.title, 'zh-CN');
+    }));
+  });
+
+  const maxDepth = Math.max(0, ...orderedLayers.keys());
+  const averageIndex = (ids: number[], referenceLayer: Task[]) => {
+    const indexById = new Map(referenceLayer.map((task, index) => [task.id, index]));
+    const indexes = ids
+      .map(id => indexById.get(id))
+      .filter((value): value is number => typeof value === 'number');
+    if (indexes.length === 0) return Number.POSITIVE_INFINITY;
+    return indexes.reduce((sum, value) => sum + value, 0) / indexes.length;
+  };
+  const compareBarycenter = (aScore: number, bScore: number) => {
+    if (!Number.isFinite(aScore) && !Number.isFinite(bScore)) return 0;
+    if (!Number.isFinite(aScore)) return 1;
+    if (!Number.isFinite(bScore)) return -1;
+    return aScore - bScore;
+  };
+
+  // A few barycenter sweeps keep heavily connected tasks near their upstream/downstream neighbors.
+  for (let iteration = 0; iteration < 4; iteration++) {
+    for (let depth = 1; depth <= maxDepth; depth++) {
+      const previousLayer = orderedLayers.get(depth - 1) ?? [];
+      const layer = orderedLayers.get(depth) ?? [];
+      orderedLayers.set(depth, layer.slice().sort((a, b) => (
+        compareBarycenter(averageIndex(getTaskDependencyIds(a), previousLayer), averageIndex(getTaskDependencyIds(b), previousLayer)) ||
+        a.title.localeCompare(b.title, 'zh-CN')
+      )));
+    }
+
+    for (let depth = maxDepth - 1; depth >= 0; depth--) {
+      const nextLayer = orderedLayers.get(depth + 1) ?? [];
+      const layer = orderedLayers.get(depth) ?? [];
+      orderedLayers.set(depth, layer.slice().sort((a, b) => (
+        compareBarycenter(averageIndex(dependentsById.get(a.id ?? 0) ?? [], nextLayer), averageIndex(dependentsById.get(b.id ?? 0) ?? [], nextLayer)) ||
+        a.title.localeCompare(b.title, 'zh-CN')
+      )));
+    }
+  }
+
   const positions = new Map<number, { x: number; y: number }>();
-  [...groups.entries()].forEach(([depth, group]) => {
-    group
-      .slice()
-      .sort((a, b) => a.title.localeCompare(b.title, 'zh-CN'))
-      .forEach((task, index) => {
-        if (!task.id) return;
-        positions.set(task.id, { x: depth * COLUMN_GAP, y: index * ROW_GAP });
+  [...orderedLayers.entries()].forEach(([depth, layer]) => {
+    const rowGap = Math.max(MIN_ROW_GAP, Math.min(MAX_ROW_GAP, 260 - layer.length * 10));
+    layer.forEach((task, index) => {
+      if (!task.id) return;
+      positions.set(task.id, {
+        x: depth * COLUMN_GAP,
+        y: (index - (layer.length - 1) / 2) * rowGap,
       });
+    });
   });
   return positions;
 }
